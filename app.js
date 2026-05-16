@@ -13,7 +13,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = 3000;
-const GITHUB_REPO = 'yourusername/purple-mc-panel'; // Change to your GitHub repo
+const GITHUB_REPO = 'iam169459/purple-mc-panel';
 const CURRENT_VERSION = '1.0.0';
 const SERVER_DIR = path.join(__dirname, 'server');
 const JAR_PATH = path.join(SERVER_DIR, 'server.jar');
