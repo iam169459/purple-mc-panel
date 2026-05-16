@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "name": "PurpleMC Panel",
+  "releaseDate": "2026-01-01",
+  "notes": "Initial release",
+  "downloadUrl": "",
+  "minServerVersion": "1.20.4"
+}

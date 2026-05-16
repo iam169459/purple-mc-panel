@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PurpleMC Server Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'neon-cyan': '#00f0ff',
+                        'neon-magenta': '#ff00ff',
+                        'neon-green': '#00ff66',
+                        'neon-red': '#ff3344',
+                        'dark-bg': '#050510',
+                        'panel-bg': 'rgba(10, 20, 40, 0.7)',
+                        'hud-border': 'rgba(0, 240, 255, 0.3)',
+                        'purple-glow': '#9333ea'
+                    },
+                    fontFamily: {
+                        'mono': ['"JetBrains Mono"', '"Fira Code"', 'monospace'],
+                        'tech': ['"Orbitron"', 'sans-serif']
+                    },
+                    animation: {
+                        'scan': 'scan 2s linear infinite',
+                        'pulse-glow': 'pulse-glow 1.5s ease-in-out infinite',
+                        'flicker': 'flicker 0.15s infinite'
+                    },
+                    keyframes: {
+                        scan: { '0%': { transform: 'translateY(-100%)' }, '100%': { transform: 'translateY(100%)' } },
+                        'pulse-glow': { '0%, 100%': { opacity: 1, boxShadow: '0 0 20px rgba(0,240,255,0.5)' }, '50%': { opacity: 0.7, boxShadow: '0 0 40px rgba(0,240,255,0.8)' } },
+                        flicker: { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.8 } }
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        * { scrollbar-width: thin; scrollbar-color: #9333ea #050510; }
+        *::-webkit-scrollbar { width: 4px; }
+        *::-webkit-scrollbar-track { background: #050510; }
+        *::-webkit-scrollbar-thumb { background: #9333ea; border-radius: 2px; }
+
+        body {
+            background: #050510;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .grid-bg {
+            position: fixed;
+            inset: 0;
+            background-image: 
+                linear-gradient(rgba(147, 51, 234, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(147, 51, 234, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: grid-move 20s linear infinite;
+        }
+        @keyframes grid-move {
+            0% { transform: perspective(500px) rotateX(10deg) translateY(0); }
+            100% { transform: perspective(500px) rotateX(10deg) translateY(50px); }
+        }
+
+        .scanlines {
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 0, 0, 0.1) 2px, rgba(0, 0, 0, 0.1) 4px);
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        .corner-bracket {
+            position: relative;
+        }
+        .corner-bracket::before, .corner-bracket::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-color: #9333ea;
+            border-style: solid;
+        }
+        .corner-bracket::before {
+            top: -1px;
+            left: -1px;
+            border-width: 2px 0 0 2px;
+        }
+        .corner-bracket::after {
+            bottom: -1px;
+            right: -1px;
+            border-width: 0 2px 2px 0;
+        }
+
+        .neon-text-purple {
+            text-shadow: 0 0 10px #9333ea, 0 0 20px #9333ea, 0 0 40px #9333ea;
+        }
+        .neon-text-cyan {
+            text-shadow: 0 0 10px #00f0ff, 0 0 20px #00f0ff;
+        }
+        .neon-text-green {
+            text-shadow: 0 0 10px #00ff66, 0 0 20px #00ff66;
+        }
+
+        .hud-panel {
+            background: linear-gradient(135deg, rgba(20, 10, 40, 0.9) 0%, rgba(10, 5, 30, 0.95) 100%);
+            border: 1px solid rgba(147, 51, 234, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+        .hud-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #9333ea, transparent);
+            animation: scan 3s linear infinite;
+        }
+
+        .status-indicator {
+            position: relative;
+        }
+        .status-indicator::before {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            background: inherit;
+            filter: blur(8px);
+            opacity: 0.6;
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        .sci-tab {
+            position: relative;
+            background: rgba(147, 51, 234, 0.05);
+            border: 1px solid rgba(147, 51, 234, 0.2);
+            color: #a78bfa;
+            transition: all 0.3s;
+        }
+        .sci-tab::before {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0%;
+            height: 2px;
+            background: #9333ea;
+            transition: width 0.3s;
+        }
+        .sci-tab:hover::before, .sci-tab.active::before {
+            width: 100%;
+        }
+        .sci-tab.active {
+            background: rgba(147, 51, 234, 0.2);
+            color: #c4b5fd;
+            box-shadow: 0 0 20px rgba(147, 51, 234, 0.3), inset 0 0 20px rgba(147, 51, 234, 0.1);
+        }
+
+        .terminal-bg {
+            background: rgba(0, 0, 0, 0.8);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .console-line {
+            position: relative;
+            padding-left: 10px;
+            border-left: 1px solid rgba(147, 51, 234, 0.2);
+        }
+        .console-line::before {
+            content: '>';
+            position: absolute;
+            left: -8px;
+            color: #9333ea;
+            opacity: 0.5;
+        }
+
+        .sci-btn {
+            position: relative;
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+        .sci-btn-start {
+            background: rgba(0, 255, 102, 0.15);
+            border: 1px solid #00ff66;
+            color: #00ff66;
+        }
+        .sci-btn-start:hover {
+            background: rgba(0, 255, 102, 0.25);
+            box-shadow: 0 0 20px rgba(0, 255, 102, 0.3);
+        }
+        .sci-btn-stop {
+            background: rgba(255, 200, 50, 0.15);
+            border: 1px solid #ffc832;
+            color: #ffc832;
+        }
+        .sci-btn-stop:hover {
+            background: rgba(255, 200, 50, 0.25);
+            box-shadow: 0 0 20px rgba(255, 200, 50, 0.3);
+        }
+        .sci-btn-kill {
+            background: rgba(255, 51, 68, 0.15);
+            border: 1px solid #ff3344;
+            color: #ff3344;
+        }
+        .sci-btn-kill:hover {
+            background: rgba(255, 51, 68, 0.25);
+            box-shadow: 0 0 20px rgba(255, 51, 68, 0.3);
+        }
+        .sci-btn-purple {
+            background: rgba(147, 51, 234, 0.15);
+            border: 1px solid #9333ea;
+            color: #a78bfa;
+        }
+        .sci-btn-purple:hover {
+            background: rgba(147, 51, 234, 0.25);
+            box-shadow: 0 0 20px rgba(147, 51, 234, 0.3);
+        }
+
+        .sci-input {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(147, 51, 234, 0.3);
+            color: #c4b5fd;
+            transition: all 0.3s;
+        }
+        .sci-input:focus {
+            border-color: #9333ea;
+            box-shadow: 0 0 10px rgba(147, 51, 234, 0.3);
+            outline: none;
+        }
+        .sci-input::placeholder {
+            color: rgba(147, 51, 234, 0.4);
+        }
+
+        .progress-fill-purple {
+            background: linear-gradient(90deg, #9333ea, #c084fc);
+            box-shadow: 0 0 10px #9333ea;
+        }
+
+        .file-item {
+            border: 1px solid rgba(147, 51, 234, 0.1);
+            transition: all 0.2s;
+        }
+        .file-item:hover {
+            border-color: #9333ea;
+            background: rgba(147, 51, 234, 0.1);
+        }
+
+        .tech-line {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #9333ea, transparent);
+        }
+
+        .data-value {
+            font-family: 'Orbitron', sans-serif;
+            letter-spacing: 2px;
+        }
+
+        .quick-action-card {
+            background: rgba(147, 51, 234, 0.05);
+            border: 1px solid rgba(147, 51, 234, 0.2);
+            transition: all 0.2s;
+        }
+        .quick-action-card:hover {
+            background: rgba(147, 51, 234, 0.1);
+            border-color: #9333ea;
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body class="text-purple-300 font-mono min-h-screen p-4 md:p-6 relative">
+    
+    <!-- Background Effects -->
+    <div class="grid-bg"></div>
+    <div class="scanlines"></div>
+
+    <!-- Header -->
+    <header class="hud-panel corner-bracket rounded-lg p-4 mb-4 relative z-10">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+                <div class="status-indicator w-4 h-4 rounded-full bg-red-500" id="status-glow"></div>
+                <div>
+                    <h1 class="text-2xl font-tech font-bold tracking-widest neon-text-purple">PURPLE-MC-SERVER</h1>
+                    <p class="text-xs text-purple-600">MINECRAFT PANEL CONTROL v1.0</p>
+                </div>
+            </div>
+
+            <div class="flex gap-6 text-xs">
+                <div class="text-center">
+                    <div class="text-purple-600 mb-1">CPU_LOAD</div>
+                    <div class="data-value text-lg neon-text-cyan" id="cpu-stat">0%</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-purple-600 mb-1">MEM_ALLOC</div>
+                    <div class="data-value text-lg text-pink-400" id="ram-stat">0 MB</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-purple-600 mb-1">ONLINE</div>
+                    <div class="data-value text-lg neon-text-green" id="players-count">0</div>
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button onclick="sendAction('start')" class="sci-btn sci-btn-start px-4 py-2 rounded text-xs font-bold uppercase tracking-wider">▶ INIT</button>
+                <button onclick="sendAction('stop')" class="sci-btn sci-btn-stop px-4 py-2 rounded text-xs font-bold uppercase tracking-wider">■ HALT</button>
+                <button onclick="sendAction('kill')" class="sci-btn sci-btn-kill px-4 py-2 rounded text-xs font-bold uppercase tracking-wider">✖ FORCE</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="flex gap-2 mb-4 overflow-x-auto pb-2 relative z-10">
+        <button onclick="switchTab('console')" class="sci-tab active px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="console">
+            <span class="mr-2">◈</span>TERMINAL
+        </button>
+        <button onclick="switchTab('quick')" class="sci-tab px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="quick">
+            <span class="mr-2">⚡</span>QUICK_ACTIONS
+        </button>
+        <button onclick="switchTab('players')" class="sci-tab px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="players">
+            <span class="mr-2">◉</span>PLAYERS
+        </button>
+        <button onclick="switchTab('world')" class="sci-tab px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="world">
+            <span class="mr-2">🌍</span>WORLD
+        </button>
+        <button onclick="switchTab('files')" class="sci-tab px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="files">
+            <span class="mr-2">◫</span>FILES
+        </button>
+        <button onclick="switchTab('settings')" class="sci-tab px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="settings">
+            <span class="mr-2">⚙</span>CONFIG
+        </button>
+        <button onclick="switchTab('system')" class="sci-tab px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="system">
+            <span class="mr-2">🖥</span>SYSTEM
+        </button>
+        <button onclick="switchTab('update')" class="sci-tab px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="update">
+            <span class="mr-2">🔄</span>UPDATE
+        </button>
+        <button onclick="switchTab('backups')" class="sci-tab px-5 py-2.5 rounded text-xs font-bold uppercase tracking-widest" data-tab="backups">
+            <span class="mr-2">⧉</span>BACKUPS
+        </button>
+    </div>
+
+    <!-- ==================== CONSOLE TAB ==================== -->
+    <div id="tab-console" class="tab-content z-10">
+        <div class="hud-panel corner-bracket rounded-lg flex flex-col h-[50vh]">
+            <div class="flex items-center justify-between px-4 py-2 border-b border-purple-900/50">
+                <div class="text-xs text-purple-600">
+                    <span class="mr-4">◉ LIVE_STREAM</span>
+                    <span id="connection-status" class="text-neon-green">CONNECTED</span>
+                </div>
+                <button onclick="clearConsole()" class="text-xs text-purple-600 hover:text-purple-400 transition">[CLEAR_BUFFER]</button>
+            </div>
+            <div id="console-log" class="terminal-bg flex-1 p-4 overflow-y-auto text-xs space-y-1 text-green-400 leading-relaxed">
+                <div class="console-line text-purple-500">>> SYSTEM_INITIALIZED... waiting for process launch</div>
+            </div>
+            <div class="p-3 border-t border-purple-900/50 flex gap-2 items-center bg-black/30">
+                <span class="text-green-400 text-sm">›</span>
+                <input type="text" id="cmd-input" placeholder="Enter command sequence..." 
+                       class="sci-input flex-1 px-3 py-2 rounded text-sm"
+                       onkeydown="if(event.key === 'Enter') sendCommand()">
+                <button onclick="sendCommand()" class="sci-btn sci-btn-purple px-4 py-2 rounded text-xs uppercase">EXEC</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== QUICK ACTIONS TAB ==================== -->
+    <div id="tab-quick" class="tab-content hidden z-10">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <!-- World Info -->
+            <div class="quick-action-card corner-bracket rounded-lg p-4">
+                <div class="text-2xl mb-2">🌍</div>
+                <div class="text-sm font-bold mb-1">World Status</div>
+                <div id="world-status" class="text-xs text-purple-400">Checking...</div>
+            </div>
+            
+            <!-- Server Info -->
+            <div class="quick-action-card corner-bracket rounded-lg p-4">
+                <div class="text-2xl mb-2">🖥️</div>
+                <div class="text-sm font-bold mb-1">Server</div>
+                <div id="server-status" class="text-xs text-red-400">OFFLINE</div>
+            </div>
+            
+            <!-- RAM Usage -->
+            <div class="quick-action-card corner-bracket rounded-lg p-4">
+                <div class="text-2xl mb-2">💾</div>
+                <div class="text-sm font-bold mb-1">Memory</div>
+                <div class="text-xs">
+                    <div class="progress-hud h-2 rounded mb-1">
+                        <div id="ram-bar" class="progress-fill-purple h-full rounded" style="width: 0%"></div>
+                    </div>
+                    <span id="ram-quick" class="text-purple-400">0 / 2048 MB</span>
+                </div>
+            </div>
+            
+            <!-- Players Online -->
+            <div class="quick-action-card corner-bracket rounded-lg p-4">
+                <div class="text-2xl mb-2">👥</div>
+                <div class="text-sm font-bold mb-1">Players</div>
+                <div id="players-quick" class="text-2xl font-bold text-purple-400">0</div>
+            </div>
+            
+            <!-- Quick Start -->
+            <div class="quick-action-card corner-bracket rounded-lg p-4 cursor-pointer" onclick="sendAction('start')">
+                <div class="text-2xl mb-2">▶️</div>
+                <div class="text-sm font-bold mb-1 text-neon-green">Start Server</div>
+                <div class="text-xs text-purple-500">Launch Minecraft</div>
+            </div>
+            
+            <!-- Quick Stop -->
+            <div class="quick-action-card corner-bracket rounded-lg p-4 cursor-pointer" onclick="sendAction('stop')">
+                <div class="text-2xl mb-2">⏹️</div>
+                <div class="text-sm font-bold mb-1 text-yellow-400">Stop Server</div>
+                <div class="text-xs text-purple-500">Graceful shutdown</div>
+            </div>
+            
+            <!-- Quick Backup -->
+            <div class="quick-action-card corner-bracket rounded-lg p-4 cursor-pointer" onclick="createBackup()">
+                <div class="text-2xl mb-2">💾</div>
+                <div class="text-sm font-bold mb-1 text-cyan-400">Quick Backup</div>
+                <div class="text-xs text-purple-500">Save world now</div>
+            </div>
+            
+            <!-- View Logs -->
+            <div class="quick-action-card corner-bracket rounded-lg p-4 cursor-pointer" onclick="switchTab('console')">
+                <div class="text-2xl mb-2">📋</div>
+                <div class="text-sm font-bold mb-1 text-purple-400">View Logs</div>
+                <div class="text-xs text-purple-500">Console output</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== PLAYERS TAB ==================== -->
+    <div id="tab-players" class="tab-content hidden z-10">
+        <div class="hud-panel corner-bracket rounded-lg p-4">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-tech tracking-widest">
+                    <span class="text-purple-500">◈</span> ACTIVE_PLAYERS
+                </h2>
+                <div class="text-xs text-purple-600">TOTAL: <span id="player-total" class="text-purple-400">0</span></div>
+            </div>
+            <div id="players-list" class="space-y-2 max-h-[30vh] overflow-y-auto">
+                <div class="text-center text-purple-600 py-8">// NO PLAYERS ONLINE //</div>
+            </div>
+            
+            <div class="mt-6 pt-4 border-t border-purple-900/50">
+                <h3 class="text-xs text-purple-600 mb-3">>> PLAYER_CONTROLS</h3>
+                <div class="flex flex-wrap gap-2">
+                    <input type="text" id="player-name-input" placeholder="Player name" class="sci-input px-3 py-2 rounded text-xs w-40">
+                    <button onclick="kickPlayer()" class="sci-btn sci-btn-stop px-3 py-2 rounded text-xs">KICK</button>
+                    <button onclick="banPlayer()" class="sci-btn sci-btn-kill px-3 py-2 rounded text-xs">BAN</button>
+                    <button onclick="opPlayer()" class="sci-btn sci-btn-purple px-3 py-2 rounded text-xs">OP</button>
+                    <button onclick="tpPlayer()" class="sci-btn bg-blue-900/30 border border-blue-500 text-blue-400 px-3 py-2 rounded text-xs">TP</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== WORLD TAB ==================== -->
+    <div id="tab-world" class="tab-content hidden z-10">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- World Info -->
+            <div class="hud-panel corner-bracket rounded-lg p-4">
+                <h2 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">🌍</span> WORLD_INFORMATION
+                </h2>
+                <div id="world-info" class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">World Folder</span>
+                        <span id="world-exists" class="text-red-400">Not Found</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Nether</span>
+                        <span id="nether-exists" class="text-red-400">Not Found</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">The End</span>
+                        <span id="end-exists" class="text-red-400">Not Found</span>
+                    </div>
+                    <div class="tech-line my-2"></div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Total Size</span>
+                        <span id="world-size" class="text-purple-400">0 MB</span>
+                    </div>
+                </div>
+                <button onclick="loadWorldInfo()" class="sci-btn sci-btn-purple w-full mt-4 py-2 rounded text-xs">↻ REFRESH</button>
+            </div>
+            
+            <!-- World Actions -->
+            <div class="hud-panel corner-bracket rounded-lg p-4">
+                <h2 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">⚡</span> WORLD_ACTIONS
+                </h2>
+                <div class="space-y-3">
+                    <button onclick="downloadWorld()" class="sci-btn sci-btn-purple w-full py-3 rounded text-sm flex items-center justify-center gap-2">
+                        <span>📥</span> Download World (ZIP)
+                    </button>
+                    
+                    <label class="sci-btn sci-btn-purple w-full py-3 rounded text-sm flex items-center justify-center gap-2 cursor-pointer">
+                        <span>📤</span> Upload World (ZIP)
+                        <input type="file" accept=".zip" onchange="uploadWorld(this)" class="hidden">
+                    </label>
+                    
+                    <button onclick="generateNewWorld()" class="sci-btn sci-btn-stop w-full py-3 rounded text-sm flex items-center justify-center gap-2">
+                        <span>🗑️</span> Delete & Generate New World
+                    </button>
+                    
+                    <button onclick="switchTab('backups')" class="sci-btn sci-btn-start w-full py-3 rounded text-sm flex items-center justify-center gap-2">
+                        <span>⏪</span> Restore from Backup
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== FILES TAB ==================== -->
+    <div id="tab-files" class="tab-content hidden z-10">
+        <div class="hud-panel corner-bracket rounded-lg p-4">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-tech tracking-widest">
+                    <span class="text-purple-500">◫</span> FILE_BROWSER
+                </h2>
+                <div class="flex gap-2">
+                    <button onclick="navigateUp()" class="sci-btn sci-btn-purple px-3 py-1 rounded text-xs">↑ PARENT</button>
+                    <button onclick="refreshFiles()" class="sci-btn sci-btn-purple px-3 py-1 rounded text-xs">↻ REFRESH</button>
+                </div>
+            </div>
+            <div class="text-xs text-purple-600 mb-3">PATH: <span id="current-path" class="text-purple-400">/</span></div>
+            <div id="files-list" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-[30vh] overflow-y-auto"></div>
+            
+            <div id="file-editor" class="hidden mt-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs text-purple-600">EDIT: <span id="edit-filename" class="text-purple-400"></span></span>
+                    <div class="flex gap-2">
+                        <button onclick="saveFile()" class="sci-btn sci-btn-start px-3 py-1 rounded text-xs">SAVE</button>
+                        <button onclick="closeEditor()" class="sci-btn bg-slate-800 border border-slate-600 text-slate-400 px-3 py-1 rounded text-xs">ABORT</button>
+                    </div>
+                </div>
+                <textarea id="file-content" class="w-full h-48 sci-input p-3 rounded text-xs leading-relaxed"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== SETTINGS TAB ==================== -->
+    <div id="tab-settings" class="tab-content hidden z-10">
+        <div class="hud-panel corner-bracket rounded-lg p-4">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-tech tracking-widest">
+                    <span class="text-purple-500">⚙</span> SERVER_PROPERTIES
+                </h2>
+                <button onclick="saveSettings()" class="sci-btn sci-btn-start px-4 py-1 rounded text-xs">SAVE</button>
+            </div>
+            <div id="settings-form" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[45vh] overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <!-- ==================== SYSTEM TAB ==================== -->
+    <div id="tab-system" class="tab-content hidden z-10">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- CPU Info -->
+            <div class="hud-panel corner-bracket rounded-lg p-4">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">⚡</span> CPU_STATUS
+                </h3>
+                <div id="cpu-info" class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Cores</span>
+                        <span id="cpu-cores" class="text-purple-400">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Model</span>
+                        <span id="cpu-model" class="text-purple-400 text-xs">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Load</span>
+                        <span id="cpu-load" class="text-cyan-400">-</span>
+                    </div>
+                    <div class="progress-hud h-2 rounded mt-2">
+                        <div id="cpu-bar" class="progress-fill-purple h-full rounded" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RAM Management -->
+            <div class="hud-panel corner-bracket rounded-lg p-4">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">💾</span> MEMORY_ALLOCATION
+                </h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">System RAM</span>
+                        <span id="sys-ram-total" class="text-purple-400">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">System Used</span>
+                        <span id="sys-ram-used" class="text-yellow-400">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Server Allocated</span>
+                        <span id="server-ram" class="text-neon-green">2G</span>
+                    </div>
+                    <div class="progress-hud h-2 rounded mt-2">
+                        <div id="ram-system-bar" class="bg-gradient-to-r from-purple-500 to-pink-500 h-full rounded" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <label class="text-xs text-purple-500 block mb-2">Change Allocation:</label>
+                    <select id="memory-select" onchange="changeMemory(this.value)" class="sci-input w-full px-3 py-2 rounded text-sm">
+                        <option value="512M">512 MB</option>
+                        <option value="1G">1 GB</option>
+                        <option value="2G" selected>2 GB</option>
+                        <option value="3G">3 GB</option>
+                        <option value="4G">4 GB</option>
+                        <option value="6G">6 GB</option>
+                        <option value="8G">8 GB</option>
+                        <option value="12G">12 GB</option>
+                        <option value="16G">16 GB</option>
+                    </select>
+                    <button onclick="applyMemory()" class="sci-btn sci-btn-purple w-full mt-2 py-2 rounded text-xs">APPLY CHANGE</button>
+                </div>
+            </div>
+
+            <!-- Storage -->
+            <div class="hud-panel corner-bracket rounded-lg p-4">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">💿</span> STORAGE
+                </h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Total Disk</span>
+                        <span id="disk-total" class="text-purple-400">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Used</span>
+                        <span id="disk-used" class="text-yellow-400">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Free</span>
+                        <span id="disk-free" class="text-neon-green">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Server Folder</span>
+                        <span id="server-folder-size" class="text-cyan-400">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Max Storage</span>
+                        <span id="max-storage" class="text-purple-400">Unlimited</span>
+                    </div>
+                    <div class="progress-hud h-2 rounded mt-2">
+                        <div id="disk-bar" class="bg-gradient-to-r from-cyan-500 to-blue-500 h-full rounded" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="mt-4 pt-4 border-t border-purple-900/50">
+                    <label class="text-xs text-purple-500 block mb-2">Set Max Storage Limit:</label>
+                    <div class="flex gap-2">
+                        <select id="storage-select" class="sci-input flex-1 px-3 py-2 rounded text-sm">
+                            <option value="5">5 GB</option>
+                            <option value="10" selected>10 GB</option>
+                            <option value="20">20 GB</option>
+                            <option value="30">30 GB</option>
+                            <option value="50">50 GB</option>
+                            <option value="100">100 GB</option>
+                            <option value="0">Unlimited</option>
+                        </select>
+                        <button onclick="applyStorage()" class="sci-btn sci-btn-purple px-3 py-2 rounded text-xs">SET</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Settings -->
+            <div class="hud-panel corner-bracket rounded-lg p-4 md:col-span-2">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">🚀</span> PERFORMANCE_SETTINGS
+                </h3>
+                <div id="perf-settings" class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div class="flex flex-col">
+                        <label class="text-xs text-purple-500 mb-1">View Distance</label>
+                        <select id="view-distance" class="sci-input px-3 py-2 rounded text-sm">
+                            <option>6</option><option>8</option>
+                            <option selected>10</option>
+                            <option>12</option><option>16</option><option>20</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs text-purple-500 mb-1">Simulation Distance</label>
+                        <select id="sim-distance" class="sci-input px-3 py-2 rounded text-sm">
+                            <option>6</option><option>8</option>
+                            <option selected>10</option>
+                            <option>12</option><option>16</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs text-purple-500 mb-1">Max Players</label>
+                        <input type="number" id="max-players" value="20" class="sci-input px-3 py-2 rounded text-sm">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs text-purple-500 mb-1">Spawn Radius</label>
+                        <input type="number" id="spawn-radius" value="10" class="sci-input px-3 py-2 rounded text-sm">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs text-purple-500 mb-1">Entity Range</label>
+                        <select id="entity-range" class="sci-input px-3 py-2 rounded text-sm">
+                            <option>32</option>
+                            <option selected>64</option>
+                            <option>128</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs text-purple-500 mb-1">Allow Flight</label>
+                        <select id="allow-flight" class="sci-input px-3 py-2 rounded text-sm">
+                            <option value="false">Disabled</option>
+                            <option value="true">Enabled</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="savePerformance()" class="sci-btn sci-btn-start w-full mt-4 py-2 rounded text-xs">SAVE PERFORMANCE</button>
+            </div>
+
+            <!-- System Info -->
+            <div class="hud-panel corner-bracket rounded-lg p-4">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">ℹ</span> SYSTEM_INFO
+                </h3>
+                <div class="space-y-2 text-xs">
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Platform</span>
+                        <span id="sys-platform" class="text-purple-400">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Hostname</span>
+                        <span id="sys-hostname" class="text-purple-400">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-purple-500">Uptime</span>
+                        <span id="sys-uptime" class="text-cyan-400">-</span>
+                    </div>
+                </div>
+                <div class="mt-4 pt-4 border-t border-purple-900/50">
+                    <button onclick="clearLogs()" class="sci-btn sci-btn-kill w-full py-2 rounded text-xs">🗑️ CLEAR LOGS</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== BACKUPS TAB ==================== -->
+    <div id="tab-backups" class="tab-content hidden z-10">
+        <div class="hud-panel corner-bracket rounded-lg p-4">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-tech tracking-widest">
+                    <span class="text-purple-500">⧉</span> DATA_ARCHIVE
+                </h2>
+                <button onclick="createBackup()" class="sci-btn sci-btn-start px-4 py-1 rounded text-xs">+ NEW_SNAPSHOT</button>
+            </div>
+            <div id="backups-list" class="space-y-2 max-h-[45vh] overflow-y-auto">
+                <div class="text-center text-purple-600 py-8">// NO ARCHIVES FOUND //</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== UPDATE TAB ==================== -->
+    <div id="tab-update" class="tab-content hidden z-10">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Current Version -->
+            <div class="hud-panel corner-bracket rounded-lg p-4">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">📋</span> CURRENT_VERSION
+                </h3>
+                <div class="text-center py-6">
+                    <div class="text-4xl font-tech text-purple-400 mb-2" id="current-version">1.0.0</div>
+                    <div class="text-xs text-purple-500">PurpleMC Server Panel</div>
+                </div>
+                <div class="mt-4 pt-4 border-t border-purple-900/50">
+                    <div class="flex justify-between text-xs">
+                        <span class="text-purple-500">Repository:</span>
+                        <span class="text-purple-400" id="repo-name">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Check Updates -->
+            <div class="hud-panel corner-bracket rounded-lg p-4">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">🔍</span> CHECK_UPDATES
+                </h3>
+                <div id="update-status" class="text-center py-4">
+                    <div class="text-purple-400 mb-2">Click to check for updates</div>
+                    <button onclick="checkUpdate()" class="sci-btn sci-btn-purple px-6 py-3 rounded text-sm">
+                        🔄 CHECK NOW
+                    </button>
+                </div>
+                <div id="update-result" class="hidden">
+                    <div class="text-center py-4">
+                        <div id="update-version" class="text-2xl font-tech text-neon-green mb-2">-</div>
+                        <div id="update-message" class="text-xs text-purple-500 mb-4">-</div>
+                    </div>
+                    <div id="update-actions" class="flex gap-2 justify-center">
+                        <button onclick="applyUpdate()" class="sci-btn sci-btn-start px-4 py-2 rounded text-xs">
+                            ⬇️ UPDATE NOW
+                        </button>
+                        <button onclick="checkUpdate()" class="sci-btn sci-btn-purple px-4 py-2 rounded text-xs">
+                            ↻ REFRESH
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Release Notes -->
+            <div class="hud-panel corner-bracket rounded-lg p-4 md:col-span-2">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">📝</span> RELEASE_NOTES
+                </h3>
+                <div id="release-notes" class="bg-black/30 rounded p-4 max-h-40 overflow-y-auto text-xs text-purple-400">
+                    <div class="text-purple-600">No release information available. Click "Check Now" to see latest updates.</div>
+                </div>
+            </div>
+
+            <!-- Manual Install -->
+            <div class="hud-panel corner-bracket rounded-lg p-4 md:col-span-2">
+                <h3 class="text-sm font-tech tracking-widest mb-4">
+                    <span class="text-purple-500">⚡</span> MANUAL_UPDATE
+                </h3>
+                <div class="text-xs text-purple-500 mb-4">
+                    If automatic update fails, you can manually update by pulling from Git:
+                </div>
+                <div class="bg-black/40 p-3 rounded mb-3">
+                    <code class="text-cyan-400 text-xs">cd /path/to/purple-panel && git pull</code>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="manualUpdate()" class="sci-btn sci-btn-purple px-4 py-2 rounded text-xs">
+                        🔄 PULL & RESTART
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="mt-4 text-center text-xs text-purple-700 relative z-10">
+        <div class="tech-line mb-2"></div>
+        <span class="cursor-blink">_</span> PURPLE-MC-SYSTEM // READY
+    </footer>
+
+    <script>
+        const socket = io();
+        const consoleLog = document.getElementById('console-log');
+        const statusGlow = document.getElementById('status-glow');
+        let currentPath = '';
+        let serverRunning = false;
+        let serverStorage = 0;
+        let logCount = 0;
+
+        // === TAB SYSTEM ===
+        function switchTab(tab) {
+            document.querySelectorAll('.sci-tab').forEach(b => b.classList.remove('active'));
+            document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+
+            if (tab === 'quick') loadQuickStats();
+            if (tab === 'players') loadPlayers();
+            if (tab === 'world') loadWorldInfo();
+            if (tab === 'files') refreshFiles();
+            if (tab === 'settings') loadSettings();
+            if (tab === 'backups') loadBackups();
+        }
+
+        // === QUICK STATS ===
+        async function loadQuickStats() {
+            const res = await fetch('/api/actions');
+            const data = await res.json();
+            
+            document.getElementById('world-status').innerHTML = data.worldExists ? 
+                '<span class="text-neon-green">LOADED</span>' : '<span class="text-red-400">NOT FOUND</span>';
+            document.getElementById('server-status').innerHTML = data.serverRunning ? 
+                '<span class="text-neon-green">RUNNING</span>' : '<span class="text-red-400">OFFLINE</span>';
+        }
+
+        // === STATUS ===
+        socket.on('status', (status) => {
+            serverRunning = status === 'online';
+            if (serverRunning) {
+                statusGlow.className = 'status-indicator w-4 h-4 rounded-full bg-neon-green';
+                addLog('>> PROCESS_INITIALIZED... server running', 'purple');
+            } else {
+                statusGlow.className = 'status-indicator w-4 h-4 rounded-full bg-red-500';
+                document.getElementById('cpu-stat').innerText = '0%';
+                document.getElementById('ram-stat').innerText = '0 MB';
+                document.getElementById('players-count').innerText = '0';
+            }
+        });
+
+        // === CONSOLE ===
+        socket.on('console', (data) => {
+            const line = data.trim();
+            if (logCount++ < 500) {
+                addLog(line, getLogType(line));
+            }
+        });
+
+        function addLog(text, type = 'green') {
+            const el = document.createElement('div');
+            el.className = 'console-line';
+            const colors = {
+                green: 'text-green-400',
+                purple: 'text-purple-400', 
+                red: 'text-red-400',
+                yellow: 'text-yellow-400',
+                cyan: 'text-cyan-400'
+            };
+            el.classList.add(colors[type] || colors.green);
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            el.innerHTML = `<span class="text-purple-700 mr-2">[${time}]</span>${escapeHtml(text)}`;
+            consoleLog.appendChild(el);
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+        }
+
+        function getLogType(line) {
+            if (line.includes('ERROR') || line.includes('[ERROR]')) return 'red';
+            if (line.includes('WARN') || line.includes('WARNING')) return 'yellow';
+            if (line.includes('Done') || line.includes('Started')) return 'purple';
+            if (line.includes('Player') || line.includes('joined') || line.includes('left')) return 'cyan';
+            return 'green';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function clearConsole() {
+            consoleLog.innerHTML = '<div class="console-line text-purple-600">>> BUFFER_CLEARED...</div>';
+            logCount = 0;
+        }
+
+        // === STATS ===
+        socket.on('stats', (data) => {
+            document.getElementById('cpu-stat').innerText = data.cpu + '%';
+            document.getElementById('ram-stat').innerText = data.memory + ' MB';
+            document.getElementById('ram-quick').innerText = `${data.memory} / 2048 MB`;
+            document.getElementById('ram-bar').style.width = `${(data.memory / 2048) * 100}%`;
+        });
+
+        // === PLAYERS ===
+        socket.on('players', (players) => {
+            document.getElementById('players-count').innerText = players.length;
+            document.getElementById('player-total').innerText = players.length;
+            document.getElementById('players-quick').innerText = players.length;
+            renderPlayers(players);
+        });
+
+        function renderPlayers(players) {
+            const list = document.getElementById('players-list');
+            if (players.length === 0) {
+                list.innerHTML = '<div class="text-center text-purple-600 py-8">// NO PLAYERS ONLINE //</div>';
+            } else {
+                list.innerHTML = players.map(p => `
+                    <div class="file-item flex items-center justify-between p-3 rounded bg-black/20">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-neon-green animate-pulse"></span>
+                            <span class="text-sm">${p}</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="kickPlayer('${p}')" class="text-yellow-400 text-xs hover:text-yellow-300">KICK</button>
+                            <button onclick="banPlayer('${p}')" class="text-red-400 text-xs hover:text-red-300">BAN</button>
+                            <button onclick="opPlayer('${p}')" class="text-purple-400 text-xs hover:text-purple-300">OP</button>
+                            <button onclick="tpPlayer('${p}')" class="text-cyan-400 text-xs hover:text-cyan-300">TP</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function sendAction(action) { socket.emit('action', action); }
+
+        function sendCommand() {
+            const input = document.getElementById('cmd-input');
+            if (input.value.trim()) {
+                socket.emit('command', input.value);
+                addLog(`> ${input.value}`, 'purple');
+                input.value = "";
+            }
+        }
+
+        // === PLAYERS API ===
+        async function loadPlayers() {
+            const res = await fetch('/api/players');
+            const players = await res.json();
+            renderPlayers(players);
+        }
+
+        function kickPlayer(name) {
+            name = name || document.getElementById('player-name-input').value;
+            if (name) { fetch('/api/players/kick', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ player: name }) }); addLog(`>> KICK: ${name}`, 'yellow'); }
+        }
+
+        function banPlayer(name) {
+            name = name || document.getElementById('player-name-input').value;
+            if (name) { fetch('/api/players/ban', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ player: name }) }); addLog(`>> BAN: ${name}`, 'red'); }
+        }
+
+        function opPlayer(name) {
+            name = name || document.getElementById('player-name-input').value;
+            if (name) { fetch('/api/players/op', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ player: name }) }); addLog(`>> OP: ${name}`, 'purple'); }
+        }
+
+        function tpPlayer(name) {
+            name = name || document.getElementById('player-name-input').value;
+            if (name) { socket.emit('command', `tp ${name} @s`); addLog(`>> TP: ${name} to you`, 'cyan'); }
+        }
+
+        // === WORLD ===
+        async function loadWorldInfo() {
+            const res = await fetch('/api/world');
+            const data = await res.json();
+            
+            document.getElementById('world-exists').innerHTML = data.world?.exists ? '<span class="text-neon-green">EXISTS</span>' : '<span class="text-red-400">NOT FOUND</span>';
+            document.getElementById('nether-exists').innerHTML = data.nether?.exists ? '<span class="text-neon-green">EXISTS</span>' : '<span class="text-red-400">NOT FOUND</span>';
+            document.getElementById('end-exists').innerHTML = data.theEnd?.exists ? '<span class="text-neon-green">EXISTS</span>' : '<span class="text-red-400">NOT FOUND</span>';
+            document.getElementById('world-size').innerText = (data.totalSize / 1024 / 1024).toFixed(2) + ' MB';
+        }
+
+        function downloadWorld() {
+            window.location.href = '/api/world/download';
+            addLog('>> WORLD_DOWNLOAD_INITIATED', 'purple');
+        }
+
+        function uploadWorld(input) {
+            if (input.files.length > 0) {
+                addLog('>> UPLOAD_RECEIVED: ' + input.files[0].name + ' - Restart to apply', 'purple');
+                alert('World upload received. Stop server, replace world folder manually, then start.');
+            }
+        }
+
+        async function generateNewWorld() {
+            if (serverRunning) {
+                alert('Stop server first!');
+                return;
+            }
+            if (confirm('Delete current world and generate new one?')) {
+                const res = await fetch('/api/world/generate', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    addLog('>> WORLD_RESET_COMPLETE', 'purple');
+                    loadWorldInfo();
+                }
+            }
+        }
+
+        // === FILES ===
+        async function refreshFiles() {
+            const serverDir = '/Users/Apple/Documents/purple-panel/server';
+            const res = await fetch(`/api/files?dir=${encodeURIComponent(serverDir + currentPath)}`);
+            const files = await res.json();
+            const list = document.getElementById('files-list');
+            document.getElementById('current-path').innerText = currentPath || '/';
+
+            list.innerHTML = files.map(f => `
+                <div onclick="${f.isDirectory ? `goToDir('${f.path}')` : `editFile('${f.path}')`}" 
+                     class="file-item cursor-pointer p-3 rounded text-center hover:bg-purple-900/20">
+                    <div class="text-2xl mb-1">${f.isDirectory ? '📁' : '📄'}</div>
+                    <div class="text-xs truncate">${f.name}</div>
+                </div>
+            `).join('') || '<div class="text-purple-600 col-span-full text-center py-4">// EMPTY //</div>';
+        }
+
+        function goToDir(path) { currentPath = path; refreshFiles(); }
+        function navigateUp() { if (currentPath) { const parts = currentPath.split('/').filter(Boolean); parts.pop(); currentPath = '/' + parts.join('/'); refreshFiles(); } }
+
+        async function editFile(filePath) {
+            const res = await fetch(`/api/files/read?path=${encodeURIComponent(filePath)}`);
+            const data = await res.json();
+            if (data.error) return alert('ERROR: ' + data.error);
+            document.getElementById('file-editor').classList.remove('hidden');
+            document.getElementById('edit-filename').innerText = filePath;
+            document.getElementById('file-content').dataset.path = filePath;
+            document.getElementById('file-content').value = data.content;
+        }
+
+        async function saveFile() {
+            const path = document.getElementById('file-content').dataset.path;
+            const content = document.getElementById('file-content').value;
+            await fetch('/api/files/write', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ path, content }) });
+            addLog('>> FILE_SAVED: ' + path, 'purple');
+        }
+        function closeEditor() { document.getElementById('file-editor').classList.add('hidden'); }
+
+        // === SETTINGS ===
+        async function loadSettings() {
+            const res = await fetch('/api/settings');
+            const settings = await res.json();
+            const form = document.getElementById('settings-form');
+            const fields = ['server-name', 'max-players', 'online-mode', 'allow-flight', 'motd', 'spawn-protection', 'view-distance', 'white-list', 'allow-nether', 'hardcore'];
+            form.innerHTML = fields.map(f => `
+                <div class="flex flex-col">
+                    <label class="text-xs text-purple-600 mb-1 uppercase">${f.replace('-', ' ')}</label>
+                    <input type="text" data-key="${f}" value="${settings[f] || ''}" class="sci-input px-3 py-2 rounded text-sm">
+                </div>
+            `).join('');
+        }
+
+        async function saveSettings() {
+            const inputs = document.querySelectorAll('#settings-form input');
+            const settings = {};
+            inputs.forEach(i => settings[i.dataset.key] = i.value);
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings) });
+            addLog('>> CONFIG_SAVED', 'purple');
+        }
+
+        // === BACKUPS ===
+        async function loadBackups() {
+            const res = await fetch('/api/backups');
+            const backups = await res.json();
+            const list = document.getElementById('backups-list');
+            if (backups.length === 0) {
+                list.innerHTML = '<div class="text-center text-purple-600 py-8">// NO ARCHIVES //</div>';
+            } else {
+                list.innerHTML = backups.map(b => `
+                    <div class="file-item flex items-center justify-between p-3 rounded bg-black/20">
+                        <div>
+                            <div class="text-sm">${b.name}</div>
+                            <div class="text-xs text-purple-600">${b.size} MB // ${new Date(b.date).toLocaleString()}</div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="restoreBackup('${b.name}')" class="text-cyan-400 text-xs hover:text-cyan-300">RESTORE</button>
+                            <button onclick="deleteBackup('${b.name}')" class="text-red-400 text-xs hover:text-red-300">PURGE</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        async function createBackup() {
+            addLog('>> CREATING_SNAPSHOT...', 'purple');
+            await fetch('/api/backups/create', { method: 'POST' });
+            setTimeout(loadBackups, 2000);
+        }
+
+        async function restoreBackup(name) {
+            if (confirm('>> WARNING: Overwrite current world?')) {
+                addLog('>> RESTORING: ' + name, 'yellow');
+                await fetch('/api/backups/restore', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name }) });
+            }
+        }
+
+        async function deleteBackup(name) {
+            if (confirm('Delete ' + name + '?')) {
+                await fetch(`/api/backups/${name}`, { method: 'DELETE' });
+                addLog('>> ARCHIVE_DELETED: ' + name, 'red');
+                loadBackups();
+            }
+        }
+
+        // === SYSTEM ===
+        async function loadSystemInfo() {
+            const res = await fetch('/api/system');
+            const data = await res.json();
+            
+            // CPU
+            document.getElementById('cpu-cores').innerText = data.cpu.cores;
+            document.getElementById('cpu-model').innerText = data.cpu.model.substring(0, 30);
+            document.getElementById('cpu-load').innerText = data.cpu.load.toFixed(1) + '%';
+            document.getElementById('cpu-bar').style.width = Math.min(data.cpu.load, 100) + '%';
+            
+            // RAM
+            const sysRamTotal = (data.memory.total / 1024 / 1024 / 1024).toFixed(1);
+            const sysRamUsed = (data.memory.used / 1024 / 1024 / 1024).toFixed(1);
+            document.getElementById('sys-ram-total').innerText = sysRamTotal + ' GB';
+            document.getElementById('sys-ram-used').innerText = sysRamUsed + ' GB';
+            document.getElementById('server-ram').innerText = (data.memory.serverAllocated / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+            document.getElementById('ram-system-bar').style.width = data.memory.usedPercent + '%';
+            
+            // Storage
+            const diskTotal = (data.storage.total / 1024 / 1024 / 1024).toFixed(1);
+            const diskUsed = (data.storage.used / 1024 / 1024 / 1024).toFixed(1);
+            const diskFree = (data.storage.free / 1024 / 1024 / 1024).toFixed(1);
+            const serverFolder = (data.storage.serverFolder / 1024 / 1024).toFixed(0);
+            document.getElementById('disk-total').innerText = diskTotal + ' GB';
+            document.getElementById('disk-used').innerText = diskUsed + ' GB';
+            document.getElementById('disk-free').innerText = diskFree + ' GB';
+            document.getElementById('server-folder-size').innerText = serverFolder + ' MB';
+            document.getElementById('disk-bar').style.width = data.storage.usedPercent + '%';
+            
+            // System
+            document.getElementById('sys-platform').innerText = data.system.platform;
+            document.getElementById('sys-hostname').innerText = data.system.hostname;
+            document.getElementById('sys-uptime').innerText = formatUptime(data.system.uptime * 1000);
+            
+            // Load performance settings
+            const perf = await fetch('/api/system/performance').then(r => r.json());
+            document.getElementById('view-distance').value = perf.viewDistance;
+            document.getElementById('sim-distance').value = perf.simulationDistance;
+            document.getElementById('max-players').value = perf.maxPlayers;
+            document.getElementById('spawn-radius').value = perf.spawnRadius;
+            document.getElementById('entity-range').value = perf.entityTrackingRange;
+            document.getElementById('allow-flight').value = perf.allowFlight.toString();
+            
+            // Load memory allocation
+            const mem = await fetch('/api/system/memory').then(r => r.json());
+            document.getElementById('memory-select').value = mem.allocated;
+        }
+
+        function formatUptime(ms) {
+            const days = Math.floor(ms / 86400000);
+            const hours = Math.floor((ms % 86400000) / 3600000);
+            const mins = Math.floor((ms % 3600000) / 60000);
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${mins}m`;
+            return `${mins}m`;
+        }
+
+        async function changeMemory(value) {
+            document.getElementById('server-ram').innerText = value;
+        }
+
+        async function applyMemory() {
+            const memory = document.getElementById('memory-select').value;
+            await fetch('/api/system/memory', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ memory }) 
+            });
+            addLog('>> MEMORY_ALLOCATION_CHANGED: ' + memory + ' (restart required)', 'yellow');
+            alert('Memory changed to ' + memory + '. Restart server to apply.');
+        }
+
+        async function applyStorage() {
+            const maxStorage = parseInt(document.getElementById('storage-select').value);
+            await fetch('/api/system/storage', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ maxStorage }) 
+            });
+            if (maxStorage === 0) {
+                document.getElementById('max-storage').innerText = 'Unlimited';
+                addLog('>> STORAGE_LIMIT_REMOVED', 'purple');
+            } else {
+                document.getElementById('max-storage').innerText = maxStorage + ' GB';
+                addLog('>> STORAGE_LIMIT_SET: ' + maxStorage + ' GB', 'purple');
+            }
+            alert('Storage limit updated!');
+        }
+
+        // Show storage limit in UI
+        document.getElementById('max-storage').innerText = serverStorage === 0 ? 'Unlimited' : serverStorage + ' GB';
+
+        async function savePerformance() {
+            const settings = {
+                viewDistance: document.getElementById('view-distance').value,
+                simulationDistance: document.getElementById('sim-distance').value,
+                maxPlayers: document.getElementById('max-players').value,
+                spawnRadius: document.getElementById('spawn-radius').value,
+                allowFlight: document.getElementById('allow-flight').value === 'true'
+            };
+            await fetch('/api/system/performance', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify(settings) 
+            });
+            addLog('>> PERFORMANCE_SETTINGS_SAVED', 'purple');
+            alert('Performance settings saved. Restart server to apply changes.');
+        }
+
+        async function clearLogs() {
+            if (confirm('Clear all server logs?')) {
+                await fetch('/api/system/logs/clear', { method: 'POST' });
+                addLog('>> LOGS_CLEARED', 'purple');
+            }
+        }
+
+        // === UPDATE SYSTEM ===
+        let updateData = null;
+
+        async function loadUpdateInfo() {
+            const res = await fetch('/api/update/info');
+            const data = await res.json();
+            document.getElementById('current-version').innerText = data.version;
+            document.getElementById('repo-name').innerText = data.repo;
+        }
+
+        async function checkUpdate() {
+            const btn = document.querySelector('button[onclick="checkUpdate()"]');
+            btn.innerText = '⏳ CHECKING...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/update/check');
+                updateData = await res.json();
+
+                document.getElementById('update-status').classList.add('hidden');
+                document.getElementById('update-result').classList.remove('hidden');
+                document.getElementById('update-version').innerText = updateData.latestVersion;
+
+                if (updateData.isUpdate) {
+                    document.getElementById('update-message').innerHTML = `<span class="text-neon-green">Update available!</span> Current: ${updateData.currentVersion}`;
+                    document.getElementById('update-actions').innerHTML = `
+                        <button onclick="applyUpdate()" class="sci-btn sci-btn-start px-4 py-2 rounded text-xs">⬇️ UPDATE NOW</button>
+                        <button onclick="checkUpdate()" class="sci-btn sci-btn-purple px-4 py-2 rounded text-xs">↻ REFRESH</button>
+                    `;
+                } else {
+                    document.getElementById('update-message').innerHTML = `<span class="text-neon-green">You're up to date!</span>`;
+                    document.getElementById('update-actions').innerHTML = `
+                        <button onclick="checkUpdate()" class="sci-btn sci-btn-purple px-4 py-2 rounded text-xs">↻ CHECK AGAIN</button>
+                    `;
+                }
+
+                if (updateData.releaseNotes) {
+                    document.getElementById('release-notes').innerText = updateData.releaseNotes.substring(0, 2000);
+                }
+            } catch (e) {
+                document.getElementById('update-message').innerText = 'Failed to check updates';
+            }
+
+            btn.innerText = '🔄 CHECK NOW';
+            btn.disabled = false;
+        }
+
+        async function applyUpdate() {
+            if (!updateData?.isUpdate) return;
+            
+            if (confirm('Update to version ' + updateData.latestVersion + '? This will pull latest from GitHub.')) {
+                const res = await fetch('/api/update/apply', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'pull' })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    alert('Update downloaded! Click OK to restart...');
+                    await fetch('/api/update/apply', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ action: 'restart' })
+                    });
+                } else {
+                    alert('Update failed: ' + data.error);
+                }
+            }
+        }
+
+        async function manualUpdate() {
+            if (confirm('Pull latest changes from Git and restart?')) {
+                addLog('>> PULLING_UPDATES...', 'purple');
+                const res = await fetch('/api/update/apply', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'pull' })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    addLog('>> UPDATE_COMPLETE', 'purple');
+                    alert('Updated! Restarting...');
+                    await fetch('/api/update/apply', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ action: 'restart' })
+                    });
+                } else {
+                    addLog('>> UPDATE_FAILED: ' + data.error, 'red');
+                    alert('Failed: ' + data.error);
+                }
+            }
+        }
+
+        // Add system tab to switchTab function
+        const originalSwitchTab = switchTab;
+        switchTab = function(tab) {
+            originalSwitchTab(tab);
+            if (tab === 'system') loadSystemInfo();
+            if (tab === 'update') loadUpdateInfo();
+        };
+    </script>
+</body>
+</html>
