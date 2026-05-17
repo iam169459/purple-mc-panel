@@ -4,10 +4,13 @@
   "main": "app.js",
   "dependencies": {
     "express": "^4.19.2",
-    "pidusage": "^3.0.2",
+    "multer": "^2.1.1",
+    "pidusage": "^4.0.1",
     "socket.io": "^4.7.5"
   },
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "check": "node --check app.js && node test/check-html-scripts.js",
+    "test": "npm run check && node --test"
   }
 }

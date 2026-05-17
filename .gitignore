@@ -1,6 +1,9 @@
 node_modules/
 server/
 backups/
+uploads/
 *.log
 .DS_Store
 .env
+*.zip
+config.json
