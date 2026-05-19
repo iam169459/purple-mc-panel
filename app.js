@@ -10,19 +10,20 @@
 // Must be at the absolute top — no path references before ROOT_DIR
 // ================================================================
 
+const ROOT_DIR = __dirname;
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { spawn } = require('child_process');
+const os = require('os');
+const pidusage = require('pidusage');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const os = require('os');
 const net = require('net');
 const axios = require('axios');
-const pidusage = require('pidusage');
 
-const ROOT_DIR = __dirname;
 const SERVER_DIR = path.join(ROOT_DIR, 'server');
 const BACKUPS_DIR = path.join(ROOT_DIR, 'backups');
 const CONFIG_DIR = path.join(ROOT_DIR, 'config');
@@ -41,6 +42,8 @@ const PAPER_VERSIONS = {
 };
 const DEFAULT_VERSION = '1.20.4';
 const DEFAULT_RAM = '2G';
+
+const GIT_REMOTE_URL = 'https://github.com/iam169459/purple-mc-panel.git';
 
 const COLORS = {
     reset: '\x1b[0m', green: '\x1b[32m', red: '\x1b[31m',
@@ -67,27 +70,15 @@ const LOG_BUFFER_MAX = 500;
 const logBuffer = [];
 
 function pushToLogBuffer(rawChunk, type) {
-    // Convert the raw Buffer chunk to a UTF-8 string so we can split it.
-    // A single 'data' event from the MC process can contain multiple lines
-    // separated by \n — e.g. "[INFO] Server started\n[INFO] Done!"
     const text = rawChunk.toString ? rawChunk.toString('utf8') : String(rawChunk);
-
-    // Split on every line-break so we handle multi-line chunks atomically.
-    // We preserve empty lines only if they contain whitespace (blank padding).
     const lines = text.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
         const lineText = lines[i];
         const trimmed = lineText.trim();
 
-        // Skip lines that are completely empty (blank entries from split).
-        // However, retain genuinely empty lines that were padded with spaces.
         if (trimmed === '' && lineText === '') continue;
 
-        // Build the structured log entry.
-        // .raw  — raw string with ANSI codes intact (for backend console, file logging)
-        // .text — clean string with ANSI stripped (for frontend display)
-        // .type — classification: 'default' | 'error' | 'warn' | 'info' | 'success' | 'system' | 'command'
         const entry = {
             raw: lineText,
             text: stripAnsi(lineText),
@@ -95,13 +86,8 @@ function pushToLogBuffer(rawChunk, type) {
             timestamp: new Date().toISOString()
         };
 
-        // Push to the circular buffer.
         logBuffer.push(entry);
 
-        // If we have exceeded the maximum, evict the oldest entry.
-        // Using a plain shift() is O(n) on the array but MAX=500 is trivial.
-        // If this were larger (10k+) we would use a ring-buffer or indexed deque.
-        // At 500 entries each ~200 bytes, RAM stays under ~100KB.
         if (logBuffer.length > LOG_BUFFER_MAX) {
             logBuffer.shift();
         }
@@ -109,8 +95,6 @@ function pushToLogBuffer(rawChunk, type) {
 }
 
 function stripAnsi(str) {
-    // Match ANSI escape sequences: \x1b[ followed by any number of
-    // parameter bytes (digits, semicolons) and a final letter.
     return str.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
 }
 
@@ -136,10 +120,6 @@ let isStopping = false;
 let serverStartTime = null;
 let restartPending = false;
 
-// Tracks the active update subprocess so we can stream its output
-// to all connected Socket.io clients in real time and prevent
-// concurrent update attempts.
-let updateProcess = null;
 let isUpdateRunning = false;
 
 // ================================================================
@@ -147,7 +127,6 @@ let isUpdateRunning = false;
 // ================================================================
 
 const CURRENT_VERSION = '1.0.0';
-const GITHUB_REPO = 'https://api.github.com/repos/iam169459/purple-mc-panel/releases/latest';
 
 function log(message, type = 'info') {
     const timestamp = new Date().toISOString();
@@ -292,17 +271,12 @@ async function startServer() {
         serverStartTime = Date.now();
         log(`Server started with PID: ${processPid}`, 'info');
 
-        // Forward stdout lines to the live buffer AND broadcast to all connected
-        // Socket.io clients in real-time. We pipe the chunk through pushToLogBuffer
-        // first (writes to the persistent buffer) then emit to clients.
         mcProcess.stdout.on('data', (chunk) => {
             pushToLogBuffer(chunk, 'stdout');
             io.emit('console', chunk.toString());
         });
 
         mcProcess.stderr.on('data', (chunk) => {
-            // Stderr lines are treated as errors — prepend error marker so
-            // classifyLine picks them up properly when the frontend re-renders.
             pushToLogBuffer(chunk, 'stderr');
             io.emit('console', `\x1b[31m[ERROR]\x1b[0m ${chunk}`);
         });
@@ -311,8 +285,6 @@ async function startServer() {
             isStarting = false;
             io.emit('status', 'online');
             log('Server process spawned successfully', 'info');
-            // Track the server boot in the persistent log buffer so that if a
-            // new client connects after this event, they still see it in history.
             pushToLogBuffer(`[SYSTEM] Minecraft server started (PID: ${mcProcess.pid})`, 'system');
         });
 
@@ -324,7 +296,6 @@ async function startServer() {
             io.emit('status', 'offline');
             io.emit('players', []);
 
-            // Record the shutdown in the persistent buffer.
             pushToLogBuffer(`[SYSTEM] Minecraft server stopped (exit code: ${code})`, 'system');
 
             if (restartPending) {
@@ -400,8 +371,6 @@ function sendCommand(command) {
         return { success: false, error: 'No server running or empty command' };
     }
     try {
-        // Write the command to the MC process stdin and record it in the
-        // persistent log buffer so it shows up in subsequent client sessions.
         mcProcess.stdin.write(command.trim() + '\n');
         pushToLogBuffer(`$ ${command.trim()}`, 'command');
         return { success: true };
@@ -1401,200 +1370,143 @@ app.delete('/api/backups/:name', (req, res) => {
 // PHASE 14: GIT-BASED ATOMIC UPDATE ENGINE
 // ================================================================
 
-const DEFAULT_GIT_REPO = 'https://github.com/iam169459/purple-mc-panel.git';
+/**
+ * Executes a git command and returns trimmed stdout.
+ * Silently returns null on failure (no exceptions thrown).
+ */
+function gitExec(args, options = {}) {
+    try {
+        const result = require('child_process').execFileSync('git', args, {
+            cwd: ROOT_DIR,
+            encoding: 'utf8',
+            timeout: 15000,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            ...options
+        });
+        return (result.stdout || result).toString().trim();
+    } catch {
+        return null;
+    }
+}
 
 app.get('/api/update/check', async (req, res) => {
     try {
         log('Checking for Git updates...', 'info');
 
-        const response = await axios.get(GITHUB_REPO, {
-            headers: {
-                'Accept': 'application/vnd.github+json',
-                'User-Agent': 'PurpleMC-Panel-Optimizer'
-            },
-            timeout: 10000
-        });
+        // Get current version tag from local git history
+        const currentTag = gitExec(['describe', '--tags', '--abbrev=0']) || CURRENT_VERSION;
+        const currentVersion = currentTag.replace(/^v/, '');
 
-        const latestVersion = response.data.tag_name.replace(/^v/, '');
-        const updateAvailable = latestVersion !== CURRENT_VERSION;
+        // Get latest remote tag without cloning
+        const remoteRefs = gitExec(['ls-remote', '--tags', '--sort=-v:refname', GIT_REMOTE_URL]);
+        let latestTag = null;
+
+        if (remoteRefs) {
+            // Parse the last line of `--tags --sort=-v:refname` which gives the newest tag
+            const tagLines = remoteRefs.split('\n').filter(l => l.trim());
+            for (const line of tagLines.reverse()) {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length >= 2) {
+                    const ref = parts[1];
+                    // Filter out ^{} dereference annotations
+                    const cleanRef = ref.replace(/\^\{\}$/, '');
+                    if (cleanRef.startsWith('refs/tags/')) {
+                        const tag = cleanRef.replace('refs/tags/', '');
+                        if (/^v?\d+\.\d+\.\d+/.test(tag)) {
+                            latestTag = tag;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!latestTag) {
+            log('Could not determine latest remote tag from git', 'warn');
+            return res.json({
+                updateAvailable: false,
+                currentVersion,
+                latestVersion: currentVersion,
+                gitRepoUrl: GIT_REMOTE_URL,
+                method: 'git_sync'
+            });
+        }
+
+        const latestVersion = latestTag.replace(/^v/, '');
+        const updateAvailable = latestVersion !== currentVersion;
 
         res.json({
             updateAvailable,
-            currentVersion: CURRENT_VERSION,
+            currentVersion,
             latestVersion,
-            gitRepoUrl: DEFAULT_GIT_REPO,
+            gitRepoUrl: GIT_REMOTE_URL,
             method: 'git_sync'
         });
     } catch (err) {
-        console.error('[UpdateCheck] GitHub API request failed:', err.message);
-        console.error('[UpdateCheck] Error details:', err.response ? err.response.status : 'no response');
         log(`Update check failed: ${err.message}`, 'error');
         res.status(500).json({
-            error: 'Failed to reach GitHub API',
+            error: 'Failed to check for updates via git',
             currentVersion: CURRENT_VERSION,
-            gitRepoUrl: DEFAULT_GIT_REPO,
+            gitRepoUrl: GIT_REMOTE_URL,
             method: 'git_sync'
         });
     }
 });
 
-/**
- * updateProgress — pipes raw shell output lines from the active
- * update subprocess to every connected Socket.io client in real time.
- *
- * Each message is prefixed with a marker that the frontend uses to
- * determine if it is an INFO (white), WARNING (amber), ERROR (red),
- * or SUCCESS (green) log line. The raw unstripped text is forwarded
- * so the frontend can render it however it chooses.
- *
- * @param {string} rawLine   - The exact line emitted by the bash script.
- * @param {string} stream    - 'stdout' or 'stderr'.
- */
-function emitUpdateProgress(rawLine, stream) {
-    const trimmed = rawLine.trim();
-
-    // Classify the line based on its content so the frontend can
-    // color-code it correctly without needing to re-parse.
-    let level = 'info';
-    let displayText = trimmed;
-
-    if (stream === 'stderr' || trimmed.startsWith('ERROR') || trimmed.startsWith('[ERROR]')) {
-        level = 'error';
-        displayText = '[ERROR] ' + trimmed;
-    } else if (trimmed.startsWith('WARNING') || trimmed.startsWith('[WARNING]')) {
-        level = 'warn';
-        displayText = '[WARNING] ' + trimmed;
-    } else if (trimmed.startsWith('SUCCESS') || trimmed.startsWith('[SUCCESS]') || trimmed.includes('Rollback complete') || trimmed.includes('completed successfully')) {
-        level = 'success';
-    } else if (trimmed.startsWith('[STEP') || trimmed.startsWith('[MILESTONE]')) {
-        level = 'system';
-        displayText = trimmed;
-    }
-
-    io.emit('update-progress', {
-        level,
-        text: displayText,
-        stream,
-        timestamp: new Date().toISOString()
-    });
-}
-
-app.post('/api/update/install', async (req, res) => {
-    const { gitRepoUrl } = req.body;
-
-    let targetGitRepo = gitRepoUrl;
-
-    if (!targetGitRepo || typeof targetGitRepo !== 'string' || targetGitRepo.trim() === '') {
-        targetGitRepo = 'https://github.com/iam169459/purple-mc-panel.git';
-    }
-
-    targetGitRepo = targetGitRepo.trim();
-
+app.post('/api/update/install', (req, res) => {
     if (isUpdateRunning) {
-        console.warn('[UpdateInstall] Git sync already in progress — rejecting duplicate request.');
         return res.status(409).json({ error: 'Git sync is already running. Please wait.' });
     }
 
     if (!fs.existsSync(UPDATE_SCRIPT)) {
-        console.error('[UpdateInstall] Update script not found at:', UPDATE_SCRIPT);
+        log(`Update script not found at: ${UPDATE_SCRIPT}`, 'error');
         return res.status(500).json({ error: 'Update script not found on server. Contact support.' });
     }
 
-    log(`Git sync triggered with repository: ${targetGitRepo}`, 'info');
+    log('Git sync triggered via update.sh', 'info');
 
-    io.emit('update-progress', {
-        level: 'system',
-        text: '[GIT SYNC] Initiating Git-based deployment from ' + targetGitRepo,
-        timestamp: new Date().toISOString()
-    });
+    // Respond to client immediately — do NOT fetch any external JSON/GitHub URLs
+    res.json({ success: true, status: 'git_sync_initiated' });
 
     isUpdateRunning = true;
 
-    res.status(202).json({
-        success: true,
-        status: 'git_sync_started',
-        message: 'Git sync process started. Monitor progress in the terminal below.',
-        repository: targetGitRepo
+    // Spawn update.sh as detached subprocess
+    const updater = spawn('/bin/bash', ['./update.sh'], {
+        cwd: ROOT_DIR,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe']
     });
 
-    setImmediate(() => {
-        try {
-            updateProcess = spawn('/bin/bash', ['./update.sh', targetGitRepo], {
-                cwd: ROOT_DIR,
-                detached: true,
-                stdio: ['ignore', 'pipe', 'pipe'],
-                env: { ...process.env, HOME: '/root' }
-            });
+    updater.unref();
 
-            updateProcess.unref();
+    log('Update subprocess spawned (detached mode)', 'info');
 
-            log('Git sync subprocess spawned (detached mode)', 'info');
+    // Broadcast stdout lines to all web panel clients
+    updater.stdout.on('data', (chunk) => {
+        const dataString = chunk.toString('utf8');
+        io.emit('update-progress', dataString);
+    });
 
-            updateProcess.stdout.on('data', (chunk) => {
-                const lines = chunk.toString('utf8').split('\n');
-                for (const line of lines) {
-                    if (line.trim()) {
-                        emitUpdateProgress(line, 'stdout');
-                    }
-                }
-            });
+    // Broadcast stderr lines to all web panel clients
+    updater.stderr.on('data', (chunk) => {
+        const dataString = chunk.toString('utf8');
+        io.emit('update-progress', dataString);
+    });
 
-            updateProcess.stderr.on('data', (chunk) => {
-                const lines = chunk.toString('utf8').split('\n');
-                for (const line of lines) {
-                    if (line.trim()) {
-                        emitUpdateProgress(line, 'stderr');
-                    }
-                }
-            });
+    updater.on('error', (err) => {
+        isUpdateRunning = false;
+        log(`Update subprocess error: ${err.message}`, 'error');
+        io.emit('update-progress', `[GIT ERROR] ${err.message}\n`);
+    });
 
-            updateProcess.on('close', (code) => {
-                isUpdateRunning = false;
-                updateProcess = null;
-
-                if (code === 0) {
-                    io.emit('update-complete', {
-                        success: true,
-                        message: 'Git sync completed successfully. Panel is restarting.',
-                        exitCode: code
-                    });
-                    log('Git sync finished with exit code 0 — deployment complete', 'info');
-                } else {
-                    io.emit('update-complete', {
-                        success: false,
-                        message: 'Git sync failed. Check the log below for details.',
-                        exitCode: code
-                    });
-                    log(`Git sync finished with non-zero exit code: ${code}`, 'error');
-                }
-            });
-
-            updateProcess.on('error', (err) => {
-                isUpdateRunning = false;
-                updateProcess = null;
-                console.error('[UpdateInstall] Subprocess error:', err.message);
-                emitUpdateProgress('[GIT ERROR] Failed to spawn update process: ' + err.message, 'stderr');
-                io.emit('update-complete', {
-                    success: false,
-                    message: 'Failed to spawn update process: ' + err.message,
-                    exitCode: -1
-                });
-            });
-
-        } catch (spawnErr) {
-            isUpdateRunning = false;
-            updateProcess = null;
-            console.error('[UpdateInstall] Exception while spawning update process:', spawnErr.message);
-            io.emit('update-progress', {
-                level: 'error',
-                text: '[GIT FATAL] Exception: ' + spawnErr.message,
-                timestamp: new Date().toISOString()
-            });
-            io.emit('update-complete', {
-                success: false,
-                message: 'Failed to spawn update process: ' + spawnErr.message,
-                exitCode: -1
-            });
+    updater.on('close', (code) => {
+        isUpdateRunning = false;
+        if (code === 0) {
+            log('Git sync completed successfully (exit code 0)', 'info');
+            io.emit('update-progress', `[GIT SUCCESS] Deployment completed successfully.\n`);
+        } else {
+            log(`Git sync finished with non-zero exit code: ${code}`, 'error');
+            io.emit('update-progress', `[GIT ERROR] Deployment failed with exit code ${code}.\n`);
         }
     });
 });
@@ -1619,22 +1531,16 @@ app.get('/api/system', (req, res) => {
 io.on('connection', (socket) => {
     log(`Client connected: ${socket.id}`, 'info');
 
-    // IMMEDIATELY DUMP the full rolling log buffer to this new client.
-    // This ensures that on page load or browser refresh, the terminal
-    // instantly populates with the last LOG_BUFFER_MAX (500) lines of
-    // historical output — no blank screen waiting for new server events.
-    // We send the clean .text field (ANSI-stripped) so the browser receives
-    // plain text. The frontend will reconstruct the full colored history
-    // when it receives this event. The raw field is kept for server-side
-    // logging / file export if we add a /api/logs/export endpoint later.
+    // Immediately dump the rolling log buffer to the new client.
+    // This ensures a browser refresh instantly populates the terminal
+    // with the last 500 lines of historical Minecraft server output.
     socket.emit('console-history', logBuffer.map(entry => ({
         text: entry.text,
         type: entry.type,
         timestamp: entry.timestamp
     })));
 
-    // Tell the client whether the Minecraft server is currently online
-    // so the UI can update its status indicators immediately on connect.
+    // Inform client of current server status
     socket.emit('status', mcProcess ? 'online' : 'offline');
 
     socket.on('action', async (action) => {
@@ -1717,4 +1623,5 @@ init().catch(err => {
     process.exit(1);
 });
 
-module.exports = { app, server, io };console.log('Test Update v1.0.4-Beta Ready');
+module.exports = { app, server, io };
+console.log('Test Update v1.0.4-Beta Ready');
