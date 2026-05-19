@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "main": "app.js",
   "dependencies": {
-    "express": "^4.19.2",
+    "axios": "^1.16.1",
+    "express": "^4.22.2",
     "multer": "^2.1.1",
     "pidusage": "^4.0.1",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.8.3"
   },
   "scripts": {
     "start": "node app.js",
