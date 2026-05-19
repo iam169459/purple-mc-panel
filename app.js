@@ -269,7 +269,10 @@ async function startServer() {
 
         processPid = mcProcess.pid;
         serverStartTime = Date.now();
+        isStarting = false;
         log(`Server started with PID: ${processPid}`, 'info');
+        io.emit('status', 'online');
+        pushToLogBuffer(`[SYSTEM] Minecraft server started (PID: ${processPid})`, 'system');
 
         mcProcess.stdout.on('data', (chunk) => {
             pushToLogBuffer(chunk, 'stdout');
@@ -279,13 +282,6 @@ async function startServer() {
         mcProcess.stderr.on('data', (chunk) => {
             pushToLogBuffer(chunk, 'stderr');
             io.emit('console', `\x1b[31m[ERROR]\x1b[0m ${chunk}`);
-        });
-
-        mcProcess.on('spawn', () => {
-            isStarting = false;
-            io.emit('status', 'online');
-            log('Server process spawned successfully', 'info');
-            pushToLogBuffer(`[SYSTEM] Minecraft server started (PID: ${mcProcess.pid})`, 'system');
         });
 
         mcProcess.on('close', (code) => {
