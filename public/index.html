@@ -160,11 +160,21 @@
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             border: 1px solid rgba(124, 58, 237, 0.08);
         }
-        .plugin-card:hover {
-            transform: translateY(-4px);
-            border-color: rgba(157, 78, 221, 0.3);
-            box-shadow: 0 16px 48px rgba(157, 78, 221, 0.14);
-        }
+.plugin-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(157, 78, 221, 0.3);
+    box-shadow: 0 16px 48px rgba(157, 78, 221, 0.14);
+}
+
+.essential-card {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(124, 58, 237, 0.08);
+}
+.essential-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(157, 78, 221, 0.35);
+    box-shadow: 0 12px 36px rgba(157, 78, 221, 0.18);
+}
 
         .install-btn {
             transition: all 0.2s ease;
@@ -174,6 +184,12 @@
             transform: scale(1.03);
         }
         .install-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.plugin-progress-bar {
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.plugin-progress-bar.error { background: linear-gradient(90deg, #ef4444, #dc2626); }
+.plugin-progress-bar.complete { background: linear-gradient(90deg, #22c55e, #16a34a); }
 
         .file-row { transition: background 0.15s ease; }
         .file-row:hover { background: rgba(157, 78, 221, 0.04); }
@@ -646,7 +662,39 @@
                                 Search
                             </button>
                         </div>
+                        <div class="border-t border-zinc-800/40 pt-4 mt-4 flex items-center gap-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-lg bg-purple-600/20 flex items-center justify-center">
+                                    <i class="fa-solid fa-upload text-purple-400 text-sm"></i>
+                                </div>
+                                <div>
+                                    <div class="text-sm text-zinc-300 font-medium">Upload Plugin</div>
+                                    <p class="text-xs text-zinc-600">Upload a .jar file directly</p>
+                                </div>
+                            </div>
+                            <input type="file" id="plugin-file-input" accept=".jar" class="hidden" onchange="uploadPluginFile(this)">
+                            <button onclick="document.getElementById('plugin-file-input').click()"
+                                    class="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-sm font-semibold rounded-xl transition flex items-center gap-2 ml-auto">
+                                <i class="fa-solid fa-file-arrow-up text-xs"></i>
+                                Choose File
+                            </button>
+                            <span id="upload-file-name" class="text-xs text-zinc-600 hidden"></span>
+                        </div>
                     </div>
+                </div>
+
+                <!-- Essential Starter Pack -->
+                <div class="glass-card rounded-2xl p-6 mb-4">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500/30 to-fuchsia-500/20 flex items-center justify-center">
+                            <i class="fa-solid fa-star text-purple-400 text-sm"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-sm font-bold text-white">Essential Starter Pack</h3>
+                            <p class="text-xs text-zinc-500">One-click install of the most essential server plugins</p>
+                        </div>
+                    </div>
+                    <div id="essential-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3"></div>
                 </div>
 
                 <!-- State Containers -->
@@ -1646,6 +1694,16 @@
             updateConsoleMetrics(stats);
         });
 
+        /**
+         * plugin-progress — real-time installation progress for plugin downloads.
+         * Emitted by the server during POST /api/plugins/install with stages:
+         * resolving -> downloading -> verifying -> complete (or error).
+         * Updates the install button with a live progress bar and percentage.
+         */
+        socket.on('plugin-progress', function(data) {
+            updatePluginProgress(data.pluginId, data.stage, data.percent, data.message);
+        });
+
         // ================================================================
         // STATUS & METRICS DISPLAY UPDATES
         // ================================================================
@@ -1861,6 +1919,7 @@
                     loadFileManager('/api/files/list?path=/', '/');
                     break;
                 case 'marketplace':
+                    loadEssentialPlugins();
                     loadInstalledPlugins();
                     break;
                 case 'options':
@@ -2345,13 +2404,81 @@
                     '</div>' +
                     '<button onclick="installPlugin(\'' + p.id + '\', \'' + p.source + '\', \'' + p.name.replace(/'/g, "\\'") + '\')" ' +
                             'id="' + installBtnId + '" ' +
-                            'class="install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2">' +
+                            'class="install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 relative overflow-hidden">' +
                         '<i class="fa-solid fa-download" id="' + installIconId + '"></i>' +
                         '<span id="' + installTextId + '">Install</span>' +
+                        '<div id="install-progress-' + p.id + '" class="plugin-progress-bar absolute bottom-0 left-0 h-1 rounded-b-xl" style="width:0%"></div>' +
                     '</button>' +
                 '</div>';
             }
             grid.innerHTML = html;
+        }
+
+        const installingPlugins = {};
+
+        function updatePluginProgress(pluginId, stage, percent, message) {
+            const btn = document.getElementById('install-btn-' + pluginId);
+            const icon = document.getElementById('install-icon-' + pluginId);
+            const text = document.getElementById('install-text-' + pluginId);
+            const progressBar = document.getElementById('install-progress-' + pluginId);
+            if (!btn || !icon || !text) return;
+
+            if (stage === 'resolving') {
+                btn.disabled = true;
+                icon.className = 'fa-solid fa-circle-notch spinner';
+                text.textContent = 'Resolving...';
+            } else if (stage === 'downloading') {
+                icon.className = 'fa-solid fa-circle-notch spinner';
+                if (percent > 0) {
+                    text.textContent = percent + '%';
+                    if (progressBar) {
+                        progressBar.style.width = percent + '%';
+                        progressBar.className = 'plugin-progress-bar absolute bottom-0 left-0 h-1 bg-purple-500 rounded-b-xl';
+                    }
+                } else {
+                    text.textContent = 'Downloading...';
+                }
+            } else if (stage === 'verifying') {
+                text.textContent = 'Verifying...';
+                icon.className = 'fa-solid fa-circle-notch spinner';
+                if (progressBar) {
+                    progressBar.style.width = '100%';
+                    progressBar.className = 'plugin-progress-bar absolute bottom-0 left-0 h-1 bg-amber-500 rounded-b-xl';
+                }
+            } else if (stage === 'complete') {
+                icon.className = 'fa-solid fa-check';
+                text.textContent = 'Installed!';
+                btn.className = 'install-btn w-full py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                if (progressBar) {
+                    progressBar.style.width = '100%';
+                    progressBar.className = 'plugin-progress-bar complete absolute bottom-0 left-0 h-1 rounded-b-xl';
+                }
+                delete installingPlugins[pluginId];
+                setTimeout(function() {
+                    icon.className = 'fa-solid fa-download';
+                    text.textContent = 'Install';
+                    btn.className = 'install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                    btn.disabled = false;
+                    if (progressBar) progressBar.style.width = '0%';
+                    loadInstalledPlugins();
+                }, 2500);
+            } else if (stage === 'error') {
+                icon.className = 'fa-solid fa-triangle-exclamation';
+                text.textContent = 'Failed';
+                btn.className = 'install-btn w-full py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                if (progressBar) {
+                    progressBar.className = 'plugin-progress-bar error absolute bottom-0 left-0 h-1 rounded-b-xl';
+                    progressBar.style.width = '100%';
+                }
+                delete installingPlugins[pluginId];
+                setTimeout(function() {
+                    icon.className = 'fa-solid fa-download';
+                    text.textContent = 'Retry';
+                    btn.className = 'install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                    btn.disabled = false;
+                    if (progressBar) progressBar.style.width = '0%';
+                }, 4000);
+            }
         }
 
         async function installPlugin(id, source, name) {
@@ -2359,14 +2486,13 @@
                 alert('Stop the server before installing plugins!');
                 return;
             }
+            if (installingPlugins[id]) return;
 
             const btn = document.getElementById('install-btn-' + id);
-            const icon = document.getElementById('install-icon-' + id);
-            const text = document.getElementById('install-text-' + id);
+            if (!btn) return;
+            installingPlugins[id] = true;
 
-            btn.disabled = true;
-            icon.className = 'fa-solid fa-circle-notch spinner';
-            text.textContent = 'Installing...';
+            updatePluginProgress(id, 'resolving', 0, 'Resolving...');
 
             try {
                 const res = await fetch('/api/plugins/install', {
@@ -2376,38 +2502,48 @@
                 });
                 const data = await res.json();
 
-                if (data.success) {
-                    icon.className = 'fa-solid fa-check';
-                    text.textContent = 'Installed!';
-                    btn.className = 'install-btn w-full py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
-                    setTimeout(function() {
-                        icon.className = 'fa-solid fa-download';
-                        text.textContent = 'Install';
-                        btn.className = 'install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
-                        btn.disabled = false;
-                        loadInstalledPlugins();
-                    }, 2000);
-                } else {
-                    icon.className = 'fa-solid fa-triangle-exclamation';
-                    text.textContent = data.error || 'Failed';
-                    btn.className = 'install-btn w-full py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
-                    setTimeout(function() {
-                        icon.className = 'fa-solid fa-download';
-                        text.textContent = 'Retry';
-                        btn.className = 'install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
-                        btn.disabled = false;
-                    }, 3000);
+                if (!data.success && !installingPlugins[id]) {
+                    updatePluginProgress(id, 'error', 0, data.error || 'Failed');
+                } else if (!data.success) {
+                    updatePluginProgress(id, 'error', 0, data.error || 'Failed');
                 }
             } catch (e) {
-                icon.className = 'fa-solid fa-triangle-exclamation';
-                text.textContent = 'Error';
-                btn.className = 'install-btn w-full py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
-                setTimeout(function() {
-                    icon.className = 'fa-solid fa-download';
-                    text.textContent = 'Retry';
-                    btn.className = 'install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
-                    btn.disabled = false;
-                }, 3000);
+                if (installingPlugins[id]) {
+                    updatePluginProgress(id, 'error', 0, 'Network error');
+                }
+            }
+        }
+
+        async function loadEssentialPlugins() {
+            const grid = document.getElementById('essential-grid');
+            if (!grid) return;
+            try {
+                const res = await fetch('/api/plugins/essential');
+                const data = await res.json();
+                if (!data.success || !data.plugins) return;
+
+                let html = '';
+                for (let i = 0; i < data.plugins.length; i++) {
+                    const p = data.plugins[i];
+                    const iconHtml = '<div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600/20 to-fuchsia-500/20 flex items-center justify-center flex-shrink-0"><img src="' + p.icon + '" class="w-10 h-10 rounded-xl object-cover" alt="' + p.name + '" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'<i class=\\\\\'fa-solid fa-puzzle-piece text-purple-400 text-lg\\\\\'></i>\'"></div>';
+                    html += '<div class="essential-card glass-card rounded-xl p-4 relative overflow-hidden" data-id="' + p.id + '">' +
+                        '<div class="flex flex-col items-center text-center gap-2 mb-3">' +
+                            iconHtml +
+                            '<h4 class="text-xs font-bold text-white truncate w-full leading-tight">' + p.name + '</h4>' +
+                            '<p class="text-[10px] text-zinc-500 leading-relaxed line-clamp-2">' + p.description.substring(0, 80) + '</p>' +
+                        '</div>' +
+                        '<button onclick="installPlugin(\'' + p.id + '\', \'modrinth\', \'' + p.name.replace(/'/g, "\\'") + '\')" ' +
+                                'id="install-btn-' + p.id + '" ' +
+                                'class="install-btn w-full py-2 bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1.5 relative overflow-hidden">' +
+                            '<i class="fa-solid fa-download" id="install-icon-' + p.id + '"></i>' +
+                            '<span id="install-text-' + p.id + '">Install</span>' +
+                            '<div id="install-progress-' + p.id + '" class="plugin-progress-bar absolute bottom-0 left-0 h-1 rounded-b-xl" style="width:0%"></div>' +
+                        '</button>' +
+                    '</div>';
+                }
+                grid.innerHTML = html;
+            } catch (e) {
+                grid.innerHTML = '<div class="col-span-5 text-zinc-700 text-sm py-4 text-center">Failed to load essential plugins</div>';
             }
         }
 
@@ -2442,6 +2578,42 @@
             } catch (e) {
                 list.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">Failed to load plugins</div>';
             }
+        }
+
+        async function uploadPluginFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const nameDisplay = document.getElementById('upload-file-name');
+            nameDisplay.textContent = file.name;
+            nameDisplay.classList.remove('hidden');
+
+            if (!file.name.endsWith('.jar')) {
+                alert('Only .jar files are allowed');
+                input.value = '';
+                nameDisplay.classList.add('hidden');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('plugin', file);
+
+            try {
+                const res = await fetch('/api/plugins/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    loadInstalledPlugins();
+                    nameDisplay.textContent = 'Uploaded: ' + data.name;
+                    nameDisplay.className = 'text-xs text-green-500';
+                } else {
+                    alert(data.error || 'Upload failed');
+                    nameDisplay.classList.add('hidden');
+                }
+            } catch (e) {
+                alert('Network error');
+                nameDisplay.classList.add('hidden');
+            }
+            input.value = '';
         }
 
         async function deleteInstalledPlugin(name) {

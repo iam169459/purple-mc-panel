@@ -23,6 +23,7 @@ const path = require('path');
 const https = require('https');
 const net = require('net');
 const axios = require('axios');
+const multer = require('multer');
 
 const SERVER_DIR = path.join(ROOT_DIR, 'server');
 const BACKUPS_DIR = path.join(ROOT_DIR, 'backups');
@@ -479,6 +480,27 @@ function getSystemMetrics() {
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 app.use(express.urlencoded({ extended: true }));
+
+const pluginUpload = multer({
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => {
+            const dir = path.join(SERVER_DIR, 'plugins');
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            cb(null, dir);
+        },
+        filename: (req, file, cb) => {
+            const safe = file.originalname.replace(/[^a-zA-Z0-9._ -]/g, '_');
+            cb(null, safe);
+        }
+    }),
+    fileFilter: (req, file, cb) => {
+        if (!file.originalname.endsWith('.jar')) {
+            return cb(new Error('Only .jar files are allowed'), false);
+        }
+        cb(null, true);
+    },
+    limits: { fileSize: 100 * 1024 * 1024 }
+});
 
 function sendError(res, message, status = 400) {
     res.status(status).json({ error: message });
@@ -1061,94 +1083,81 @@ app.delete('/api/network/allocate/:port', async (req, res) => {
 const SPIGET_API = 'https://api.spiget.org/v2';
 const MODRINTH_API = 'https://api.modrinth.com/v2';
 
+const ESSENTIAL_PLUGINS = [
+    { id: 'GeyserMC', name: 'GeyserMC', description: 'Allows Bedrock players to join your Java server, enabling cross-play between Java and Bedrock editions.', icon: 'https://cdn.modrinth.com/data/GeyserMC/icon.png', author: 'GeyserMC Team', source: 'modrinth' },
+    { id: 'floodgate', name: 'Floodgate', description: 'Allows Bedrock players to join without a Java Edition account, simplifying the join process for Bedrock clients.', icon: 'https://cdn.modrinth.com/data/floodgate/icon.png', author: 'GeyserMC Team', source: 'modrinth' },
+    { id: 'luckperms', name: 'LuckPerms', description: 'Advanced permissions management with support for groups, contexts, and extensive inheritance trees.', icon: 'https://cdn.modrinth.com/data/luckperms/icon.png', author: 'Luck', source: 'modrinth' },
+    { id: 'worldedit', name: 'WorldEdit', description: 'In-game world editing utility with brushes, schematics, and millions of builds at your fingertips.', icon: 'https://cdn.modrinth.com/data/worldedit/icon.png', author: 'EngineHub', source: 'modrinth' },
+    { id: 'essentialsx', name: 'EssentialsX', description: 'Essential server management featuring teleportation, economy, warps, kits, and more.', icon: 'https://cdn.modrinth.com/data/essentialsx/icon.png', author: 'EssentialsX Team', source: 'modrinth' }
+];
+
+app.get('/api/plugins/essential', (req, res) => {
+    res.json({ success: true, plugins: ESSENTIAL_PLUGINS });
+});
+
 app.get('/api/plugins/search', async (req, res) => {
     const { q = '', page = 1, per_page = 24 } = req.query;
-
-    if (!q || q.trim().length < 2) {
-        return sendError(res, 'Search query must be at least 2 characters', 400);
-    }
+    if (!q || q.trim().length < 2) return sendError(res, 'Search query must be at least 2 characters', 400);
 
     const maxResults = Math.min(parseInt(per_page, 10) || 24, 48);
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
-
     log(`Plugin search: "${q}" page ${pageNum}`, 'info');
 
     try {
-        const spigetUrl = `${SPIGET_API}/search/resources/${encodeURIComponent(q.trim())}?page=${pageNum - 1}&size=${maxResults}&fields=id,name,tag,description,icon,downloads,likes,premium,price,version,author,file`;
-
-        const response = await axios.get(spigetUrl, {
+        // Primary source: Modrinth API with proper facets filtering
+        const mrRes = await axios.get(`${MODRINTH_API}/search`, {
+            params: {
+                query: q.trim(),
+                offset: (pageNum - 1) * maxResults,
+                limit: maxResults,
+                facets: JSON.stringify([['project_type:mod']])
+            },
             timeout: 10000,
             headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
         });
 
-        let plugins = (response.data || []).map(p => ({
-            id: p.id,
-            name: p.name || 'Unknown Plugin',
-            tag: p.tag || '',
-            description: p.description ? p.description.replace(/<[^>]*>/g, '').substring(0, 200) : '',
-            icon: p.icon ? (p.icon.url || p.icon) : null,
-            downloads: p.downloads || 0,
-            likes: p.likes || 0,
-            premium: p.premium || false,
-            price: p.price || 0,
-            version: p.version || 'N/A',
-            author: (p.author && p.author.name) ? p.author.name : 'Unknown',
-            source: 'spigot',
-            downloadUrl: p.file ? `${SPIGET_API}/resources/${p.id}/download` : null
-        }));
+        let plugins = [];
+        if (mrRes.data && mrRes.data.hits && mrRes.data.hits.length > 0) {
+            const hits = mrRes.data.hits.slice(0, maxResults);
+            const versionPromises = hits.map(async (p) => {
+                try {
+                    const vRes = await axios.get(`${MODRINTH_API}/project/${p.project_id}/version`, {
+                        timeout: 5000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
+                    });
+                    const latest = vRes.data && vRes.data[0];
+                    return {
+                        id: p.project_id, name: p.title || 'Unknown', tag: p.slug || '',
+                        description: p.description ? p.description.substring(0, 200) : '',
+                        icon: p.icon_url || null, downloads: p.downloads || 0,
+                        likes: 0, premium: false, price: 0,
+                        version: latest ? latest.version_number : 'N/A',
+                        author: p.author || 'Unknown', source: 'modrinth',
+                        downloadUrl: latest && latest.files && latest.files[0] ? latest.files[0].url : null
+                    };
+                } catch { return null; }
+            });
+            const results = await Promise.all(versionPromises);
+            plugins = results.filter(p => p && p.downloadUrl);
+        }
 
+        // Fallback: Spiget API when Modrinth returns no results
         if (plugins.length === 0) {
             try {
-                const mrRes = await axios.get(`${MODRINTH_API}/search?q=${encodeURIComponent(q.trim())}&offset=${(pageNum - 1) * maxResults}&limit=${maxResults}`, {
-                    timeout: 10000,
-                    headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
-                });
-
-                if (mrRes.data && mrRes.data.hits) {
-                    const mrPlugins = await Promise.all(mrRes.data.hits.slice(0, maxResults).map(async p => {
-                        try {
-                            const vRes = await axios.get(`${MODRINTH_API}/project/${p.project_id}/version`, {
-                                timeout: 5000,
-                                headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
-                            });
-                            const latest = vRes.data && vRes.data[0];
-                            return {
-                                id: p.project_id,
-                                name: p.title || p.name || 'Unknown',
-                                tag: p.slug || '',
-                                description: p.description || '',
-                                icon: p.icon ? p.icon.url : null,
-                                downloads: p.downloads || 0,
-                                likes: 0,
-                                premium: false,
-                                price: 0,
-                                version: latest ? latest.version_number : 'N/A',
-                                author: p.author || 'Unknown',
-                                source: 'modrinth',
-                                downloadUrl: latest && latest.files && latest.files[0] ? latest.files[0].url : null
-                            };
-                        } catch {
-                            return {
-                                id: p.project_id,
-                                name: p.title || p.name || 'Unknown',
-                                tag: p.slug || '',
-                                description: p.description || '',
-                                icon: p.icon ? p.icon.url : null,
-                                downloads: p.downloads || 0,
-                                likes: 0,
-                                premium: false,
-                                price: 0,
-                                version: 'N/A',
-                                author: p.author || 'Unknown',
-                                source: 'modrinth',
-                                downloadUrl: null
-                            };
-                        }
-                    }));
-                    plugins = mrPlugins.filter(p => p.downloadUrl);
-                }
-            } catch (mrErr) {
-                log(`Modrinth fallback search failed: ${mrErr.message}`, 'warn');
+                const spigetUrl = `${SPIGET_API}/search/resources/${encodeURIComponent(q.trim())}?page=${pageNum - 1}&size=${maxResults}&fields=id,name,tag,description,icon,downloads,likes,premium,price,version,author,file`;
+                const spRes = await axios.get(spigetUrl, { timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' } });
+                plugins = (spRes.data || []).map(p => ({
+                    id: String(p.id), name: p.name || 'Unknown Plugin', tag: p.tag || '',
+                    description: p.description ? p.description.replace(/<[^>]*>/g, '').substring(0, 200) : '',
+                    icon: p.icon ? (p.icon.url || p.icon) : null,
+                    downloads: p.downloads || 0, likes: p.likes || 0,
+                    premium: p.premium || false, price: p.price || 0,
+                    version: p.version || 'N/A',
+                    author: (p.author && p.author.name) ? p.author.name : 'Unknown',
+                    source: 'spigot',
+                    downloadUrl: p.file ? `${SPIGET_API}/resources/${p.id}/download` : null
+                })).filter(p => p.downloadUrl);
+            } catch (spErr) {
+                log(`Spigot fallback search failed: ${spErr.message}`, 'warn');
             }
         }
 
@@ -1177,14 +1186,10 @@ app.get('/api/plugins/installed', (req, res) => {
 });
 
 app.post('/api/plugins/install', async (req, res) => {
-    if (mcProcess) {
-        return sendError(res, 'Stop the server before installing plugins', 409);
-    }
+    if (mcProcess) return sendError(res, 'Stop the server before installing plugins', 409);
 
     const { resourceId, source, name } = req.body;
-    if (!resourceId || !source) {
-        return sendError(res, 'resourceId and source are required');
-    }
+    if (!resourceId || !source) return sendError(res, 'resourceId and source are required');
 
     const pluginsDir = path.join(SERVER_DIR, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir, { recursive: true });
@@ -1194,75 +1199,125 @@ app.post('/api/plugins/install', async (req, res) => {
     let downloadUrl;
     let suggestedName = name || `plugin-${resourceId}.jar`;
 
+    const emitProgress = (stage, percent, message) => {
+        io.emit('plugin-progress', { pluginId: resourceId, stage, percent, message });
+    };
+
+    emitProgress('resolving', 0, 'Resolving download URL...');
+
     try {
-        if (source === 'spigot') {
-            const infoRes = await axios.get(`${SPIGET_API}/resources/${resourceId}?fields=id,name,file`, {
-                timeout: 8000,
-                headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
+        // Resolve download URL from the appropriate source
+        if (source === 'modrinth') {
+            const vRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
+                timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
             });
-            const info = infoRes.data;
-            downloadUrl = `${SPIGET_API}/resources/${resourceId}/download`;
-            suggestedName = (info.name || suggestedName).replace(/[^a-zA-Z0-9._ -]/g, '_') + '.jar';
-        } else if (source === 'modrinth') {
-            const projRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
-                timeout: 8000,
-                headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
-            });
-            const versions = projRes.data;
+            const versions = vRes.data;
             if (!versions || !versions[0] || !versions[0].files || !versions[0].files[0]) {
+                emitProgress('error', 0, 'No downloadable file found for this plugin');
                 return sendError(res, 'No downloadable file found for this plugin version', 404);
             }
             downloadUrl = versions[0].files[0].url;
             suggestedName = versions[0].files[0].filename || suggestedName;
+        } else if (source === 'spigot') {
+            const infoRes = await axios.get(`${SPIGET_API}/resources/${resourceId}?fields=id,name`, {
+                timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
+            });
+            downloadUrl = `${SPIGET_API}/resources/${resourceId}/download`;
+            suggestedName = (infoRes.data.name || suggestedName).replace(/[^a-zA-Z0-9._ -]/g, '_') + '.jar';
         } else {
-            return sendError(res, 'Invalid source. Use "spigot" or "modrinth"', 400);
+            emitProgress('error', 0, 'Invalid plugin source');
+            return sendError(res, 'Invalid source. Use "modrinth" or "spigot"', 400);
         }
 
         if (!suggestedName.endsWith('.jar') || suggestedName.length > 255) {
+            emitProgress('error', 0, 'Invalid filename generated');
             return sendError(res, 'Invalid filename generated');
         }
 
         const targetPath = path.join(pluginsDir, suggestedName);
         if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
 
-        await new Promise((resolve, reject) => {
-            https.get(downloadUrl, { headers: { 'User-Agent': 'PurpleMC-Panel/1.0' } }, (response) => {
-                if (response.statusCode === 302 || response.statusCode === 301) {
-                    https.get(response.headers.location, (redirRes) => {
-                        if (redirRes.statusCode !== 200) return reject(new Error(`Download failed (${redirRes.statusCode})`));
-                        const newFile = fs.createWriteStream(targetPath);
-                        redirRes.pipe(newFile);
-                        newFile.on('finish', () => { newFile.close(); resolve(); });
-                        newFile.on('error', reject);
-                    }).on('error', reject);
-                    return;
-                }
+        // Stream download with real-time progress tracking via Socket.io
+        emitProgress('downloading', 0, 'Starting download...');
 
-                if (response.statusCode !== 200) {
-                    return reject(new Error(`Download failed (${response.statusCode})`));
-                }
-
-                const file = fs.createWriteStream(targetPath);
-                response.pipe(file);
-                file.on('finish', () => { file.close(); resolve(); });
-                file.on('error', reject);
-            }).on('error', reject);
+        const response = await axios({
+            method: 'GET', url: downloadUrl, responseType: 'stream',
+            timeout: 120000,
+            headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
         });
+
+        const contentLength = parseInt(response.headers['content-length'] || '0', 10);
+        let downloadedBytes = 0;
+        let lastPercent = -1;
+        const writer = fs.createWriteStream(targetPath);
+
+        response.data.on('data', (chunk) => {
+            downloadedBytes += chunk.length;
+            if (contentLength > 0) {
+                const percent = Math.min(Math.round((downloadedBytes / contentLength) * 100), 99);
+                if (percent !== lastPercent) {
+                    lastPercent = percent;
+                    const downloadedMB = (downloadedBytes / 1024 / 1024).toFixed(1);
+                    const totalMB = (contentLength / 1024 / 1024).toFixed(1);
+                    emitProgress('downloading', percent, `Downloading... ${percent}% (${downloadedMB} MB / ${totalMB} MB)`);
+                }
+            } else {
+                const downloadedMB = (downloadedBytes / 1024 / 1024).toFixed(1);
+                emitProgress('downloading', 0, `Downloading... ${downloadedMB} MB`);
+            }
+        });
+
+        response.data.pipe(writer);
+
+        await new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', (err) => reject(new Error(`Write failed: ${err.message}`)));
+        });
+
+        // Verification phase
+        emitProgress('verifying', 100, 'Verifying downloaded file...');
 
         const stat = fs.statSync(targetPath);
         if (stat.size < 1000) {
-            if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
+            fs.unlinkSync(targetPath);
+            emitProgress('error', 0, 'Downloaded file is too small, may be corrupted');
             return sendError(res, 'Downloaded file is too small, may be corrupted', 502);
         }
 
-        log(`Plugin installed: ${suggestedName} (${(stat.size / 1024 / 1024).toFixed(2)} MB)`, 'info');
+        const sizeMB = (stat.size / 1024 / 1024).toFixed(2);
+        emitProgress('complete', 100, `${suggestedName} installed successfully (${sizeMB} MB)`);
+        log(`Plugin installed: ${suggestedName} (${sizeMB} MB)`, 'info');
         io.emit('console', `\n${COLORS.green}[PLUGIN]${COLORS.reset} Installed: ${suggestedName}\n`);
-
         res.json({ success: true, name: suggestedName, size: stat.size });
+
     } catch (err) {
         log(`Plugin install error: ${err.message}`, 'error');
-        res.status(500).json({ success: false, error: err.message });
+        emitProgress('error', 0, `Install failed: ${err.message}`);
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, error: err.message });
+        }
     }
+});
+
+app.post('/api/plugins/upload', (req, res) => {
+    if (mcProcess) {
+        return sendError(res, 'Stop the server before installing plugins', 409);
+    }
+    pluginUpload.single('plugin')(req, res, (err) => {
+        if (err) {
+            if (err instanceof multer.MulterError) {
+                if (err.code === 'LIMIT_FILE_SIZE') return sendError(res, 'File exceeds 100MB limit', 413);
+                return sendError(res, err.message, 400);
+            }
+            return sendError(res, err.message, 400);
+        }
+        if (!req.file) return sendError(res, 'No file uploaded', 400);
+
+        const { filename, size, path: filePath } = req.file;
+        log(`Plugin uploaded: ${filename} (${(size / 1024 / 1024).toFixed(2)} MB)`, 'info');
+        io.emit('console', `\n[PLUGIN] Uploaded: ${filename}\n`);
+        res.json({ success: true, name: filename, size });
+    });
 });
 
 app.delete('/api/plugins/:name', (req, res) => {
