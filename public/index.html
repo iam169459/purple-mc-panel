@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Purple Control Panel</title>
+    <title>PurpleMC Panel</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="/socket.io/socket.io.js"></script>
@@ -14,11 +14,23 @@
                 extend: {
                     colors: {
                         zinc: { 850: '#1f1f22', 900: '#18181b', 950: '#09090b' },
-                        purple: { 500: '#7c3aed', 600: '#6d28d9', 400: '#a855f7' }
+                        purple: { 500: '#9d4edd', 600: '#7c3aed', 400: '#b5179e', DEFAULT: '#7c3aed' }
                     },
                     fontFamily: {
                         sans: ['Inter', 'system-ui', 'sans-serif'],
                         mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                        'slide-up': 'slideUp 0.3s ease-out',
+                        'glow-pulse': 'glowPulse 2s ease-in-out infinite alternate',
+                        'pulse-slow': 'pulseSlow 3s ease-in-out infinite'
+                    },
+                    keyframes: {
+                        fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+                        slideUp: { '0%': { opacity: '0', transform: 'translateY(12px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+                        glowPulse: { '0%': { boxShadow: '0 0 8px rgba(157, 78, 221, 0.3)' }, '100%': { boxShadow: '0 0 25px rgba(157, 78, 221, 0.6)' } },
+                        pulseSlow: { '0%, 100%': { opacity: '1' }, '50%': { opacity: '0.6' } }
                     }
                 }
             }
@@ -29,124 +41,72 @@
         *::-webkit-scrollbar { width: 6px; height: 6px; }
         *::-webkit-scrollbar-track { background: #18181b; }
         *::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
-        
+
         body {
-            background: #09090b;
+            background:
+                radial-gradient(ellipse at 15% 0%, rgba(157, 78, 221, 0.07) 0%, transparent 50%),
+                radial-gradient(ellipse at 85% 100%, rgba(181, 23, 158, 0.05) 0%, transparent 50%),
+                linear-gradient(180deg, #0a0a0f 0%, #09090b 100%);
             font-family: 'Inter', system-ui, sans-serif;
         }
-        
+
         .glass-card {
-            background: rgba(24, 24, 27, 0.6);
-            backdrop-filter: blur(12px);
-            border: 1px solid #27272a;
+            background: rgba(24, 24, 27, 0.65);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(124, 58, 237, 0.12);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.02);
         }
-        
+
+        .glass-card-hover:hover {
+            border-color: rgba(157, 78, 221, 0.3);
+            box-shadow: 0 8px 40px rgba(157, 78, 221, 0.12);
+        }
+
         .sidebar-item {
-            transition: all 0.15s ease;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border-left: 2px solid transparent;
         }
         .sidebar-item:hover {
-            background: rgba(124, 58, 237, 0.1);
+            background: rgba(157, 78, 221, 0.08);
+            border-left-color: rgba(157, 78, 221, 0.35);
         }
         .sidebar-item.active {
-            background: rgba(124, 58, 237, 0.15);
-            border-left: 2px solid #7c3aed;
+            background: rgba(157, 78, 221, 0.12);
+            border-left-color: #9d4edd;
         }
-        
+        .sidebar-item.active i,
+        .sidebar-item.active span {
+            color: #c084fc !important;
+        }
+
         .progress-bar {
-            transition: width 0.5s ease, background-color 0.3s ease;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.4s ease;
         }
-        
+
         .terminal-bg {
-            background: #000000;
+            background: #050505;
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
         }
-        
-        .terminal-line { line-height: 1.5; }
+        .terminal-line { line-height: 1.6; }
         .terminal-line.info { color: #71717a; }
         .terminal-line.warn { color: #f59e0b; }
         .terminal-line.error { color: #ef4444; }
         .terminal-line.success { color: #22c55e; }
-        .terminal-line.system { color: #a855f7; }
+        .terminal-line.system { color: #c084fc; }
         .terminal-line.command { color: #22c55e; }
         .terminal-line.default { color: #e4e4e7; }
-        
-        .status-pulse {
-            animation: pulse 2s infinite;
+
+        .btn-glow {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+        .btn-glow:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
         }
-        
-        .btn-power {
-            transition: all 0.15s ease;
-        }
-        .btn-power:hover {
-            transform: translateY(-1px);
-        }
-        
-        .input-terminal:focus {
-            outline: none;
-            box-shadow: 0 0 0 1px #3f3f46;
-        }
-        
-        /* Toggle Switch */
-        .toggle-switch {
-            width: 48px;
-            height: 26px;
-            background: #3f3f46;
-            border-radius: 13px;
-            position: relative;
-            cursor: pointer;
-            transition: background 0.3s ease;
-        }
-        .toggle-switch.active {
-            background: #7c3aed;
-            box-shadow: 0 0 15px rgba(124, 58, 237, 0.5);
-        }
-        .toggle-switch::after {
-            content: '';
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            background: white;
-            border-radius: 50%;
-            top: 3px;
-            left: 3px;
-            transition: transform 0.3s ease;
-        }
-        .toggle-switch.active::after {
-            transform: translateX(22px);
-        }
-        
-        .section-update {
-            display: none;
-        }
-        .section-update.active {
-            display: block;
-        }
-        
-        .update-badge {
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-        .update-badge.uptodate {
-            background: rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-        }
-        .update-badge.available {
-            background: rgba(124, 58, 237, 0.2);
-            color: #a855f7;
-            animation: pulse-badge 2s infinite;
-        }
-        @keyframes pulse-badge {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
-            50% { box-shadow: 0 0 0 6px rgba(124, 58, 237, 0); }
-        }
-        
+        .btn-glow:active { transform: translateY(0); }
+        .btn-glow:disabled { opacity: 0.35; cursor: not-allowed; transform: none; box-shadow: none; }
+
         .spinner {
             animation: spin 1s linear infinite;
         }
@@ -154,389 +114,1674 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
+
+        .status-pulse {
+            animation: statusPulse 2s ease-in-out infinite;
+        }
+        @keyframes statusPulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 6px currentColor; }
+            50% { opacity: 0.5; box-shadow: 0 0 12px currentColor; }
+        }
+
+        .section-content {
+            animation: fadeIn 0.25s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .modal-overlay {
+            background: rgba(0, 0, 0, 0.78);
+            backdrop-filter: blur(10px);
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .port-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .port-badge.open {
+            background: rgba(34, 197, 94, 0.12);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .port-badge.in-use {
+            background: rgba(239, 68, 68, 0.12);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .plugin-card {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid rgba(124, 58, 237, 0.08);
+        }
+        .plugin-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(157, 78, 221, 0.3);
+            box-shadow: 0 16px 48px rgba(157, 78, 221, 0.14);
+        }
+
+        .install-btn {
+            transition: all 0.2s ease;
+        }
+        .install-btn:hover:not(:disabled) {
+            box-shadow: 0 4px 18px rgba(124, 58, 237, 0.45);
+            transform: scale(1.03);
+        }
+        .install-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .file-row { transition: background 0.15s ease; }
+        .file-row:hover { background: rgba(157, 78, 221, 0.04); }
+        .file-name { cursor: pointer; transition: color 0.15s ease; }
+        .file-name:hover { color: #c084fc; }
+        .breadcrumb-item { cursor: pointer; transition: color 0.15s ease; }
+        .breadcrumb-item:hover { color: #c084fc; }
+
+        .tab-badge {
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        .tab-badge.online {
+            background: rgba(34, 197, 94, 0.12);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .tab-badge.offline {
+            background: rgba(239, 68, 68, 0.12);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .tab-badge.uptodate {
+            background: rgba(34, 197, 94, 0.12);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .tab-badge.update-available {
+            background: rgba(124, 58, 237, 0.15);
+            color: #c084fc;
+            border: 1px solid rgba(124, 58, 237, 0.4);
+        }
+
+        .input-field {
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .input-field:focus {
+            outline: none;
+            border-color: rgba(157, 78, 221, 0.6);
+            box-shadow: 0 0 0 3px rgba(157, 78, 221, 0.1);
+        }
+
+        .metric-card {
+            transition: all 0.3s ease;
+        }
+        .metric-card:hover {
+            border-color: rgba(157, 78, 221, 0.3);
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #3f3f46;
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 4px;
+            bottom: 4px;
+            background-color: #a1a1aa;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: rgba(157, 78, 221, 0.5);
+            box-shadow: 0 0 12px rgba(157, 78, 221, 0.3);
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+            background-color: #9d4edd;
+        }
+        input:checked + .toggle-slider {
+            background-color: rgba(157, 78, 221, 0.6);
+        }
+
+        .options-row {
+            transition: background 0.15s ease;
+        }
+        .options-row:hover {
+            background: rgba(157, 78, 221, 0.04);
+        }
+
+        .step-glow {
+            box-shadow: 0 0 10px rgba(157, 78, 221, 0.8), 0 0 20px rgba(157, 78, 221, 0.4);
+            background: linear-gradient(90deg, #9d4edd, #b5179e) !important;
+        }
+
+        .glow-text {
+            text-shadow: 0 0 20px rgba(157, 78, 221, 0.4);
+        }
+
+        .metric-glow {
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 20px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body class="text-zinc-300 min-h-screen flex">
-    
-    <!-- Left Sidebar -->
-    <aside class="w-56 bg-zinc-900/80 border-r border-zinc-800 flex flex-col h-screen sticky top-0">
-        <!-- Logo -->
-        <div class="p-4 border-b border-zinc-800">
+
+    <!-- ========================================================== -->
+    <!-- LEFT SIDEBAR NAVIGATION -->
+    <!-- ========================================================== -->
+    <aside class="w-58 bg-zinc-900/95 border-r border-zinc-800/70 flex flex-col h-screen sticky top-0 z-40">
+        <!-- Branding -->
+        <div class="p-5 border-b border-zinc-800/70">
             <div class="flex items-center gap-3">
-                <div class="w-9 h-9 rounded-lg bg-purple-500 flex items-center justify-center">
-                    <i class="fa-solid fa-bolt text-white text-sm"></i>
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-magenta-500 flex items-center justify-center shadow-lg animate-glow-pulse">
+                    <i class="fa-solid fa-bolt text-white text-base"></i>
                 </div>
                 <div>
-                    <h1 class="text-white font-semibold text-sm">Purple Control</h1>
-                    <p class="text-xs text-zinc-500">Server Panel</p>
+                    <h1 class="text-white font-bold text-base tracking-tight">PurpleMC</h1>
+                    <p class="text-xs text-zinc-500 tracking-wide">Control Panel</p>
                 </div>
             </div>
         </div>
-        
-        <!-- Navigation -->
-        <nav class="flex-1 p-3 space-y-1">
-            <a href="#" onclick="showView('dashboard')" class="sidebar-item active flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-chart-line text-zinc-500 w-5"></i>
-                <span>Dashboard</span>
+
+        <!-- Navigation Links -->
+        <nav class="flex-1 p-3 space-y-0.5">
+            <a href="#" onclick="showView('dashboard')" id="nav-dashboard" class="sidebar-item active flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-chart-line text-zinc-500 w-5 text-center"></i>
+                <span class="text-zinc-400">Dashboard</span>
             </a>
-            <a href="#" onclick="showView('console')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-zinc-400 hover:text-zinc-200">
-                <i class="fa-solid fa-terminal text-zinc-500 w-5"></i>
-                <span>Console</span>
+            <a href="#" onclick="showView('console')" id="nav-console" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-terminal text-zinc-500 w-5 text-center"></i>
+                <span class="text-zinc-400">Console</span>
             </a>
-            <a href="#" onclick="showView('files')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-zinc-400 hover:text-zinc-200">
-                <i class="fa-solid fa-folder text-zinc-500 w-5"></i>
-                <span>File Manager</span>
+            <a href="#" onclick="showView('files')" id="nav-files" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-folder-open text-zinc-500 w-5 text-center"></i>
+                <span class="text-zinc-400">File Explorer</span>
             </a>
-            <a href="#" onclick="showView('network')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-zinc-400 hover:text-zinc-200">
-                <i class="fa-solid fa-network-wired text-zinc-500 w-5"></i>
-                <span>Network</span>
+            <a href="#" onclick="showView('marketplace')" id="nav-marketplace" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-store text-zinc-500 w-5 text-center"></i>
+                <span class="text-zinc-400">Marketplace</span>
             </a>
-            <a href="#" onclick="showView('updates')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-zinc-400 hover:text-zinc-200">
-                <i class="fa-solid fa-sync text-zinc-500 w-5"></i>
-                <span>Updates</span>
+            <a href="#" onclick="showView('options')" id="nav-options" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-sliders text-zinc-500 w-5 text-center"></i>
+                <span class="text-zinc-400">Server Options</span>
+            </a>
+            <a href="#" onclick="showView('network')" id="nav-network" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-network-wired text-zinc-500 w-5 text-center"></i>
+                <span class="text-zinc-400">Network</span>
+            </a>
+            <a href="#" onclick="showView('settings')" id="nav-settings" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-gear text-zinc-500 w-5 text-center"></i>
+                <span class="text-zinc-400">Settings</span>
+            </a>
+            <a href="#" onclick="showView('updates')" id="nav-updates" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-cloud-arrow-up text-zinc-500 w-5 text-center"></i>
+                <span class="text-zinc-400">System Updates</span>
             </a>
         </nav>
-        
-        <!-- Server Info -->
-        <div class="p-4 border-t border-zinc-800">
-            <div class="text-xs text-zinc-500 mb-2">Server Address</div>
+
+        <!-- Server Info Footer -->
+        <div class="p-5 border-t border-zinc-800/70">
+            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-2">Server Address</div>
             <div class="text-sm text-zinc-300 font-mono" id="server-ip">Loading...</div>
+            <div class="mt-2 flex items-center gap-2">
+                <div id="status-dot" class="w-2 h-2 rounded-full bg-red-500"></div>
+                <span id="status-label" class="text-xs text-zinc-600">Offline</span>
+            </div>
         </div>
     </aside>
 
-    <!-- Main Content -->
+    <!-- ========================================================== -->
+    <!-- MAIN CONTENT AREA -->
+    <!-- ========================================================== -->
     <main class="flex-1 flex flex-col min-h-screen">
-        
-        <!-- Top Bar -->
-        <header class="glass-card px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
+
+        <!-- ====================================================== -->
+        <!-- TOP BAR -->
+        <!-- ====================================================== -->
+        <header class="glass-card px-6 py-4 border-b border-zinc-800/40 flex items-center justify-between">
             <div class="flex items-center gap-4">
-                <h2 class="text-white font-semibold">Minecraft Server</h2>
-                <span class="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">Paper 1.20.4</span>
+                <h2 class="text-white font-semibold text-lg" id="page-title">Dashboard</h2>
+                <span id="server-status-badge" class="tab-badge offline">OFFLINE</span>
             </div>
-            
-            <!-- Power Controls -->
-            <div class="flex items-center gap-2">
-                <button onclick="sendAction('start')" class="btn-power px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg flex items-center gap-2">
+
+            <!-- Power Control Buttons -->
+            <div class="flex items-center gap-2.5">
+                <button onclick="sendAction('start')" id="btn-start"
+                        class="btn-glow px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white text-sm font-semibold rounded-xl flex items-center gap-2 shadow-lg">
                     <i class="fa-solid fa-play text-xs"></i>
-                    Start
+                    <span>Start</span>
                 </button>
-                <button onclick="sendAction('stop')" class="btn-power px-4 py-2 border border-amber-600 text-amber-500 hover:bg-amber-600/10 text-sm font-medium rounded-lg flex items-center gap-2">
+                <button onclick="sendAction('stop')" id="btn-stop" disabled
+                        class="btn-glow px-5 py-2.5 border border-amber-600/60 text-amber-400 hover:bg-amber-600/10 text-sm font-semibold rounded-xl flex items-center gap-2">
                     <i class="fa-solid fa-stop text-xs"></i>
-                    Stop
+                    <span>Stop</span>
                 </button>
-                <button onclick="sendAction('kill')" class="btn-power px-4 py-2 border border-red-600 text-red-500 hover:bg-red-600/10 text-sm font-medium rounded-lg flex items-center gap-2">
-                    <i class="fa-solid fa-times text-xs"></i>
-                    Kill
+                <button onclick="sendAction('restart')" id="btn-restart" disabled
+                        class="btn-glow px-5 py-2.5 border border-purple-600/60 text-purple-400 hover:bg-purple-600/10 text-sm font-semibold rounded-xl flex items-center gap-2">
+                    <i class="fa-solid fa-rotate-right text-xs"></i>
+                    <span>Restart</span>
                 </button>
             </div>
         </header>
 
-        <!-- Metrics Grid -->
-        <div id="dashboard-section" class="grid grid-cols-4 gap-4 p-6">
-            <!-- Status Card -->
-            <div class="glass-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-3">
-                    <span class="text-xs text-zinc-500 uppercase tracking-wide">Status</span>
-                    <div class="flex items-center gap-2">
-                        <div id="status-indicator" class="w-2 h-2 rounded-full bg-red-500"></div>
+        <!-- ====================================================== -->
+        <!-- SECTION: DASHBOARD -->
+        <!-- ====================================================== -->
+        <div id="section-dashboard" class="section-content">
+            <!-- Metrics Cards Row -->
+            <div class="grid grid-cols-4 gap-4 p-6">
+                <!-- Status Card -->
+                <div class="glass-card rounded-2xl p-5">
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-xs text-zinc-500 uppercase tracking-widest font-semibold">Status</span>
+                        <div class="w-2.5 h-2.5 rounded-full" id="status-indicator"></div>
+                    </div>
+                    <div id="status-text" class="text-2xl font-bold">OFFLINE</div>
+                </div>
+
+                <!-- CPU Card -->
+                <div class="glass-card rounded-2xl p-5">
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-xs text-zinc-500 uppercase tracking-widest font-semibold">CPU Usage</span>
+                        <span id="cpu-text" class="text-sm font-mono text-zinc-300">0%</span>
+                    </div>
+                    <div class="h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div id="cpu-bar" class="h-full rounded-full progress-bar bg-zinc-500" style="width: 0%"></div>
                     </div>
                 </div>
-                <div id="status-text" class="text-xl font-semibold text-red-500">OFFLINE</div>
-            </div>
-            
-            <!-- CPU Card -->
-            <div class="glass-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-3">
-                    <span class="text-xs text-zinc-500 uppercase tracking-wide">CPU Usage</span>
-                    <span id="cpu-text" class="text-sm font-mono text-zinc-300">0%</span>
-                </div>
-                <div class="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                    <div id="cpu-bar" class="h-full bg-zinc-400 rounded-full progress-bar" style="width: 0%"></div>
-                </div>
-            </div>
-            
-            <!-- Memory Card -->
-            <div class="glass-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-3">
-                    <span class="text-xs text-zinc-500 uppercase tracking-wide">Memory</span>
-                    <span id="ram-text" class="text-sm font-mono text-zinc-300">0 GB / 2 GB</span>
-                </div>
-                <div class="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                    <div id="ram-bar" class="h-full bg-purple-500 rounded-full progress-bar" style="width: 0%"></div>
-                </div>
-            </div>
-            
-            <!-- Uptime Card -->
-            <div class="glass-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-3">
-                    <span class="text-xs text-zinc-500 uppercase tracking-wide">Uptime</span>
-                    <i class="fa-solid fa-clock text-zinc-600"></i>
-                </div>
-                <div id="uptime-text" class="text-xl font-mono text-zinc-300">--:--:--</div>
-            </div>
-        </div>
 
-        <!-- Console Section -->
-        <div id="console-section" class="px-6 pb-6 flex-1">
-            <div class="glass-card rounded-xl overflow-hidden flex flex-col h-full">
-                <!-- Terminal Header -->
-                <div class="flex items-center justify-between px-4 py-3 bg-zinc-900/50 border-b border-zinc-800">
-                    <div class="flex items-center gap-3">
-                        <div class="flex gap-1.5">
-                            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
-                            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-                            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+                <!-- Memory Card -->
+                <div class="glass-card rounded-2xl p-5">
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-xs text-zinc-500 uppercase tracking-widest font-semibold">Memory</span>
+                        <span id="ram-text" class="text-sm font-mono text-zinc-300">0 / 2 GB</span>
+                    </div>
+                    <div class="h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div id="ram-bar" class="h-full rounded-full progress-bar bg-purple-600" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Uptime Card -->
+                <div class="glass-card rounded-2xl p-5">
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-xs text-zinc-500 uppercase tracking-widest font-semibold">Uptime</span>
+                        <i class="fa-solid fa-clock text-zinc-600"></i>
+                    </div>
+                    <div id="uptime-text" class="text-2xl font-mono font-bold text-zinc-300">--:--:--</div>
+                </div>
+            </div>
+
+            <!-- Console Preview -->
+            <div class="px-6 pb-6">
+                <div class="glass-card rounded-2xl overflow-hidden">
+                    <div class="flex items-center justify-between px-5 py-3 bg-zinc-900/50 border-b border-zinc-800/40">
+                        <div class="flex items-center gap-3">
+                            <div class="flex gap-1.5">
+                                <div class="w-3 h-3 rounded-full bg-red-500/70"></div>
+                                <div class="w-3 h-3 rounded-full bg-yellow-500/70"></div>
+                                <div class="w-3 h-3 rounded-full bg-green-500/70"></div>
+                            </div>
+                            <span class="text-xs text-zinc-600 font-mono">server@purple-mc:~$</span>
                         </div>
-                        <span class="text-xs text-zinc-500 font-mono">server@purple-mc-panel:~$</span>
+                        <button onclick="showView('console')" class="text-xs text-zinc-600 hover:text-zinc-300 transition flex items-center gap-2">
+                            Open Full Console <i class="fa-solid fa-up-right-from-square text-xs"></i>
+                        </button>
                     </div>
-                    <button onclick="clearConsole()" class="text-xs text-zinc-500 hover:text-zinc-300 transition">
-                        <i class="fa-solid fa-trash-can mr-1"></i> Clear
-                    </button>
-                </div>
-                
-                <!-- Terminal Output -->
-                <div id="console-output" class="flex-1 terminal-bg p-4 overflow-y-auto min-h-[300px] max-h-[500px]">
-                    <div class="terminal-line system text-sm">» Panel connected. Waiting for server...</div>
-                </div>
-                
-                <!-- Command Input -->
-                <div class="flex items-center gap-3 px-4 py-3 bg-zinc-900/30 border-t border-zinc-800">
-                    <span class="text-zinc-500 font-mono text-sm">$</span>
-                    <input type="text" id="command-input" 
-                           class="flex-1 bg-transparent border-none text-zinc-200 font-mono text-sm placeholder-zinc-600 input-terminal"
-                           placeholder="Enter command..."
-                           onkeydown="if(event.key === 'Enter') executeCommand()">
-                    <button onclick="executeCommand()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded transition">
-                        <i class="fa-solid fa-paper-plane"></i>
-                    </button>
+                    <div id="console-preview" class="terminal-bg p-5 overflow-y-auto min-h-[180px] max-h-[260px]">
+                        <div class="terminal-line system text-sm">&#187; PurpleMC Panel connected. Start the server to begin.</div>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- System Settings & Updates Section -->
-        <div id="section-updates" class="section-update px-6 pb-6">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <!-- Auto-Update Settings -->
-                <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-lg font-semibold text-white mb-4">
-                        <i class="fa-solid fa-robot text-purple-400 mr-2"></i>
-                        Autonomous Updates
-                    </h3>
-                    
-                    <div class="flex items-center justify-between p-4 bg-zinc-900/50 rounded-lg mb-4">
+        <!-- ====================================================== -->
+        <!-- SECTION: CONSOLE -->
+        <!-- ====================================================== -->
+        <div id="section-console" class="section-content hidden">
+            <!-- Real-time Hardware Monitoring Cards -->
+            <div class="grid grid-cols-3 gap-4 px-6 pt-6 pb-0">
+                <!-- CPU Monitoring Card -->
+                <div class="metric-card glass-card rounded-2xl p-5 metric-glow">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-xl bg-red-500/10 flex items-center justify-center">
+                                <i class="fa-solid fa-microchip text-red-400 text-sm"></i>
+                            </div>
+                            <span class="text-xs text-zinc-500 uppercase tracking-widest font-semibold">CPU Load</span>
+                        </div>
+                        <span id="console-cpu-percent" class="text-lg font-mono font-bold text-white glow-text">0%</span>
+                    </div>
+                    <div class="h-2.5 bg-zinc-800 rounded-full overflow-hidden mb-3">
+                        <div id="console-cpu-bar" class="h-full rounded-full progress-bar bg-red-500 transition-all duration-700" style="width: 0%"></div>
+                    </div>
+                    <div class="flex items-center justify-between text-xs text-zinc-600">
+                        <span id="console-cpu-process">Process: 0%</span>
+                        <span id="console-cpu-cores">Cores: --</span>
+                    </div>
+                </div>
+
+                <!-- RAM Monitoring Card -->
+                <div class="metric-card glass-card rounded-2xl p-5 metric-glow">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-xl bg-purple-500/10 flex items-center justify-center">
+                                <i class="fa-solid fa-memory text-purple-400 text-sm"></i>
+                            </div>
+                            <span class="text-xs text-zinc-500 uppercase tracking-widest font-semibold">RAM Utilization</span>
+                        </div>
+                        <span id="console-ram-percent" class="text-lg font-mono font-bold text-white glow-text">0%</span>
+                    </div>
+                    <div class="h-2.5 bg-zinc-800 rounded-full overflow-hidden mb-3">
+                        <div id="console-ram-bar" class="h-full rounded-full progress-bar bg-purple-500 transition-all duration-700" style="width: 0%"></div>
+                    </div>
+                    <div class="flex items-center justify-between text-xs text-zinc-600">
+                        <span id="console-ram-process">Process: 0 MB</span>
+                        <span id="console-ram-system">System: 0 GB</span>
+                    </div>
+                </div>
+
+                <!-- Storage Monitoring Card -->
+                <div class="metric-card glass-card rounded-2xl p-5 metric-glow">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                                <i class="fa-solid fa-hard-drive text-emerald-400 text-sm"></i>
+                            </div>
+                            <span class="text-xs text-zinc-500 uppercase tracking-widest font-semibold">Storage Allocation</span>
+                        </div>
+                        <span id="console-disk-size" class="text-lg font-mono font-bold text-white glow-text">0 GB</span>
+                    </div>
+                    <div class="h-2.5 bg-zinc-800 rounded-full overflow-hidden mb-3">
+                        <div id="console-disk-bar" class="h-full rounded-full progress-bar bg-emerald-500 transition-all duration-700" style="width: 0%"></div>
+                    </div>
+                    <div class="flex items-center justify-between text-xs text-zinc-600">
+                        <span id="console-disk-files">Files: 0</span>
+                        <span id="console-disk-folders">Folders: 0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Console Terminal -->
+            <div class="px-6 pb-6 mt-4">
+                <div class="glass-card rounded-2xl overflow-hidden flex flex-col" style="min-height: calc(100vh - 320px);">
+                    <!-- Terminal Header -->
+                    <div class="flex items-center justify-between px-5 py-3 bg-zinc-900/60 border-b border-zinc-800/40">
+                        <div class="flex items-center gap-3">
+                            <div class="flex gap-1.5">
+                                <div class="w-3 h-3 rounded-full bg-red-500/70"></div>
+                                <div class="w-3 h-3 rounded-full bg-yellow-500/70"></div>
+                                <div class="w-3 h-3 rounded-full bg-green-500/70"></div>
+                            </div>
+                            <span class="text-xs text-zinc-600 font-mono">server@purple-mc:~$</span>
+                        </div>
+                        <button onclick="clearConsole()" class="text-xs text-zinc-600 hover:text-zinc-300 transition">
+                            <i class="fa-solid fa-trash-can mr-1"></i> Clear
+                        </button>
+                    </div>
+
+                    <!-- Terminal Output Area -->
+                    <div id="console-output" class="flex-1 terminal-bg p-5 overflow-y-auto" style="min-height: 400px;">
+                        <div class="terminal-line system text-sm">&#187; Panel connected. Waiting for server...</div>
+                    </div>
+
+                    <!-- Command Input Bar -->
+                    <div class="flex items-center gap-3 px-5 py-3.5 bg-zinc-950/60 border-t border-zinc-800/40">
+                        <span class="text-purple-400 font-mono font-bold text-sm">$</span>
+                        <input type="text" id="command-input"
+                               class="flex-1 bg-transparent border-none text-zinc-200 font-mono text-sm placeholder-zinc-700 focus:outline-none"
+                               placeholder="Enter server command..."
+                               onkeydown="if(event.key === 'Enter') executeCommand()">
+                        <button onclick="executeCommand()"
+                                class="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====================================================== -->
+        <!-- SECTION: FILE EXPLORER -->
+        <!-- ====================================================== -->
+        <div id="section-files" class="section-content hidden">
+            <div class="px-6 pb-6">
+                <div class="glass-card rounded-2xl overflow-hidden">
+                    <!-- File Manager Header -->
+                    <div class="flex items-center justify-between px-5 py-4 bg-zinc-900/60 border-b border-zinc-800/40">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-folder-open text-purple-400 text-lg"></i>
+                            <span class="text-sm text-zinc-300 font-semibold">File Explorer</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="fmCreateFolder()" class="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-medium rounded-lg transition flex items-center gap-2">
+                                <i class="fa-solid fa-folder-plus text-yellow-400"></i> Folder
+                            </button>
+                            <button onclick="fmCreateFile()" class="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-medium rounded-lg transition flex items-center gap-2">
+                                <i class="fa-solid fa-file-circle-plus text-purple-400"></i> File
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Breadcrumb Navigation -->
+                    <div id="fm-breadcrumbs" class="px-5 py-3 bg-zinc-950/60 border-b border-zinc-800/40 flex items-center gap-1 text-xs overflow-x-auto">
+                        <span class="text-zinc-600 font-mono">/server</span>
+                    </div>
+
+                    <!-- File Table -->
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b border-zinc-800/40 bg-zinc-900/20">
+                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-5">Name</th>
+                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-4">Type</th>
+                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-4">Size</th>
+                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-4">Modified</th>
+                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-4">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fm-file-list">
+                                <tr><td colspan="5" class="text-zinc-700 py-16 text-center text-sm">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====================================================== -->
+        <!-- SECTION: MARKETPLACE -->
+        <!-- ====================================================== -->
+        <div id="section-marketplace" class="section-content hidden">
+            <div class="px-6 pb-6">
+                <!-- Search Header -->
+                <div class="glass-card rounded-2xl p-6 mb-4">
+                    <div class="flex flex-col md:flex-row md:items-center gap-4">
+                        <div class="flex-1">
+                            <h3 class="text-lg font-bold text-white">
+                                <i class="fa-solid fa-store text-purple-400 mr-2"></i>
+                                Plugin Marketplace
+                            </h3>
+                            <p class="text-xs text-zinc-500 mt-0.5">Search Spigot & Modrinth for plugins</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="relative">
+                                <i class="fa-solid fa-search absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-600 text-xs"></i>
+                                <input type="text" id="marketplace-search"
+                                       class="input-field pl-10 pr-4 py-2.5 bg-zinc-900 border border-zinc-700 rounded-xl text-sm text-zinc-200 w-72"
+                                       placeholder="Search plugins..."
+                                       onkeydown="if(event.key === 'Enter') searchPlugins()">
+                            </div>
+                            <button onclick="searchPlugins()"
+                                    class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition flex items-center gap-2">
+                                <i class="fa-solid fa-magnifying-glass text-xs"></i>
+                                Search
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- State Containers -->
+                <div id="marketplace-loading" class="glass-card rounded-2xl py-20 text-center hidden">
+                    <i class="fa-solid fa-circle-notch spinner text-purple-400 text-4xl mb-4"></i>
+                    <p class="text-zinc-600 text-sm">Searching marketplace...</p>
+                </div>
+
+                <div id="marketplace-empty" class="glass-card rounded-2xl py-20 text-center hidden">
+                    <i class="fa-solid fa-plug text-5xl text-zinc-800 mb-4 block"></i>
+                    <p class="text-zinc-600 text-sm">Enter a keyword to search plugins</p>
+                </div>
+
+                <div id="marketplace-no-results" class="glass-card rounded-2xl py-20 text-center hidden">
+                    <i class="fa-solid fa-circle-xmark text-5xl text-zinc-800 mb-4 block"></i>
+                    <p class="text-zinc-600 text-sm">No results for "<span id="search-query-display" class="text-zinc-400"></span>"</p>
+                </div>
+
+                <div id="marketplace-error" class="glass-card rounded-2xl py-20 text-center hidden">
+                    <i class="fa-solid fa-triangle-exclamation text-5xl text-zinc-800 mb-4 block"></i>
+                    <p class="text-zinc-600 text-sm">Failed to reach marketplace. Check connection.</p>
+                </div>
+
+                <!-- Plugin Grid -->
+                <div id="marketplace-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4"></div>
+
+                <!-- Pagination -->
+                <div id="marketplace-pagination" class="hidden flex items-center justify-center gap-3 mt-4">
+                    <button onclick="prevPluginPage()" id="mp-btn-prev"
+                            class="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-200 text-sm rounded-xl transition disabled:opacity-25" disabled>
+                        <i class="fa-solid fa-chevron-left mr-1"></i> Prev
+                    </button>
+                    <span id="mp-page-info" class="text-sm text-zinc-600 px-3">Page 1</span>
+                    <button onclick="nextPluginPage()" id="mp-btn-next"
+                            class="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-200 text-sm rounded-xl transition disabled:opacity-25" disabled>
+                        Next <i class="fa-solid fa-chevron-right ml-1"></i>
+                    </button>
+                </div>
+
+                <!-- Installed Plugins -->
+                <div class="glass-card rounded-2xl p-6 mt-4">
+                    <h4 class="text-sm font-bold text-zinc-300 mb-4">
+                        <i class="fa-solid fa-puzzle-piece text-purple-400 mr-2"></i>
+                        Installed Plugins
+                    </h4>
+                    <div id="installed-plugins-list" class="space-y-2">
+                        <div class="text-zinc-700 text-sm py-4 text-center">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====================================================== -->
+        <!-- SECTION: SERVER OPTIONS -->
+        <!-- ====================================================== -->
+        <div id="section-options" class="section-content hidden">
+            <div class="px-6 pb-6">
+                <div class="glass-card rounded-2xl overflow-hidden">
+                    <!-- Server Options Header -->
+                    <div class="flex items-center justify-between px-6 py-4 bg-zinc-900/60 border-b border-zinc-800/40">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-purple-600/20 flex items-center justify-center">
+                                <i class="fa-solid fa-sliders text-purple-400 text-lg"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-white">Server Options</h3>
+                                <p class="text-xs text-zinc-500 mt-0.5">Configure game rules and server properties</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button onclick="loadServerProperties()" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-sm rounded-xl transition flex items-center gap-2">
+                                <i class="fa-solid fa-rotate text-xs"></i>
+                                Reload
+                            </button>
+                            <button onclick="saveServerProperties()" id="btn-apply-props" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition flex items-center gap-2">
+                                <i class="fa-solid fa-check text-xs"></i>
+                                Apply Game Profiles
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Properties Status Bar -->
+                    <div class="px-6 py-3 bg-zinc-950/40 border-b border-zinc-800/30 flex items-center gap-4">
+                        <div class="flex items-center gap-2 text-xs text-zinc-500">
+                            <i class="fa-solid fa-file-code text-purple-400"></i>
+                            <span>server.properties</span>
+                        </div>
+                        <div id="props-status" class="text-xs text-zinc-600">Loading properties...</div>
+                        <div id="props-restart-warning" class="hidden ml-auto text-xs text-amber-500 flex items-center gap-1">
+                            <i class="fa-solid fa-circle-exclamation"></i>
+                            Restart required to apply changes
+                        </div>
+                    </div>
+
+                    <!-- Options Grid -->
+                    <div class="p-6">
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+                            <!-- Allow Flight -->
+                            <div class="options-row bg-zinc-900/30 rounded-xl p-5 border border-zinc-800/30">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                                            <i class="fa-solid fa-plane text-purple-400 text-sm"></i>
+                                        </div>
+                                        <div>
+                                            <div class="text-sm font-semibold text-white">Allow Flight</div>
+                                            <div class="text-xs text-zinc-500 mt-0.5">Enable players to fly in survival mode</div>
+                                        </div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="opt-allow-flight" onchange="markPropsDirty()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Online Mode -->
+                            <div class="options-row bg-zinc-900/30 rounded-xl p-5 border border-zinc-800/30">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                                            <i class="fa-solid fa-globe text-blue-400 text-sm"></i>
+                                        </div>
+                                        <div>
+                                            <div class="text-sm font-semibold text-white">Online Mode</div>
+                                            <div class="text-xs text-zinc-500 mt-0.5">Authenticate players against Mojang servers</div>
+                                        </div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="opt-online-mode" onchange="markPropsDirty()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Whitelist -->
+                            <div class="options-row bg-zinc-900/30 rounded-xl p-5 border border-zinc-800/30">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                                            <i class="fa-solid fa-list text-amber-400 text-sm"></i>
+                                        </div>
+                                        <div>
+                                            <div class="text-sm font-semibold text-white">Whitelist</div>
+                                            <div class="text-xs text-zinc-500 mt-0.5">Only allow players on the whitelist to join</div>
+                                        </div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="opt-white-list" onchange="markPropsDirty()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- PVP Enable -->
+                            <div class="options-row bg-zinc-900/30 rounded-xl p-5 border border-zinc-800/30">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                                            <i class="fa-solid fa-swords text-red-400 text-sm"></i>
+                                        </div>
+                                        <div>
+                                            <div class="text-sm font-semibold text-white">PVP Enable</div>
+                                            <div class="text-xs text-zinc-500 mt-0.5">Allow players to damage each other</div>
+                                        </div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="opt-pvp" onchange="markPropsDirty()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Difficulty Selection -->
+                            <div class="options-row bg-zinc-900/30 rounded-xl p-5 border border-zinc-800/30">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                                            <i class="fa-solid fa-skull text-emerald-400 text-sm"></i>
+                                        </div>
+                                        <div>
+                                            <div class="text-sm font-semibold text-white">Difficulty</div>
+                                            <div class="text-xs text-zinc-500 mt-0.5">Set the game difficulty level</div>
+                                        </div>
+                                    </div>
+                                    <select id="opt-difficulty" onchange="markPropsDirty()" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-purple-500">
+                                        <option value="0">Peaceful</option>
+                                        <option value="1">Easy</option>
+                                        <option value="2" selected>Normal</option>
+                                        <option value="3">Hard</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Max Players -->
+                            <div class="options-row bg-zinc-900/30 rounded-xl p-5 border border-zinc-800/30">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg bg-cyan-500/10 flex items-center justify-center flex-shrink-0">
+                                            <i class="fa-solid fa-users text-cyan-400 text-sm"></i>
+                                        </div>
+                                        <div>
+                                            <div class="text-sm font-semibold text-white">Max Players</div>
+                                            <div class="text-xs text-zinc-500 mt-0.5">Maximum number of players allowed</div>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button onclick="adjustMaxPlayers(-1)" class="w-8 h-8 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-lg flex items-center justify-center transition text-sm font-bold">-</button>
+                                        <input type="number" id="opt-max-players" min="1" max="100" value="20" onchange="markPropsDirty()"
+                                               class="input-field w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-mono text-center text-zinc-200 text-center">
+                                        <button onclick="adjustMaxPlayers(1)" class="w-8 h-8 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-lg flex items-center justify-center transition text-sm font-bold">+</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <!-- Advanced Properties Section -->
+                        <div class="mt-6 border-t border-zinc-800/30 pt-6">
+                            <div class="flex items-center gap-2 mb-4">
+                                <i class="fa-solid fa-gear text-zinc-500 text-sm"></i>
+                                <span class="text-sm font-semibold text-zinc-400">Advanced Properties</span>
+                            </div>
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+                                <!-- Gamemode -->
+                                <div class="options-row bg-zinc-900/30 rounded-xl p-4 border border-zinc-800/30">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-zinc-500 font-mono">gamemode</span>
+                                        </div>
+                                        <select id="opt-gamemode" onchange="markPropsDirty()" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-purple-500">
+                                            <option value="0">Survival</option>
+                                            <option value="1">Creative</option>
+                                            <option value="2">Adventure</option>
+                                            <option value="3">Spectator</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- View Distance -->
+                                <div class="options-row bg-zinc-900/30 rounded-xl p-4 border border-zinc-800/30">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-zinc-500 font-mono">view-distance</span>
+                                        </div>
+                                        <select id="opt-view-distance" onchange="markPropsDirty()" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-purple-500">
+                                            <option value="4">4 (Ultra Low)</option>
+                                            <option value="6">6 (Low)</option>
+                                            <option value="8" selected>8 (Normal)</option>
+                                            <option value="10">10 (High)</option>
+                                            <option value="12">12 (Ultra)</option>
+                                            <option value="16">16 (Max)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Spawn Protection -->
+                                <div class="options-row bg-zinc-900/30 rounded-xl p-4 border border-zinc-800/30">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-zinc-500 font-mono">spawn-protection</span>
+                                        </div>
+                                        <input type="number" id="opt-spawn-protection" min="0" max="100" value="16" onchange="markPropsDirty()"
+                                               class="input-field w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-mono text-center text-zinc-200">
+                                    </div>
+                                </div>
+
+                                <!-- MOTD -->
+                                <div class="options-row bg-zinc-900/30 rounded-xl p-4 border border-zinc-800/30">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-zinc-500 font-mono">motd</span>
+                                        </div>
+                                        <input type="text" id="opt-motd" value="A Minecraft Server" onchange="markPropsDirty()" maxlength="59"
+                                               class="input-field bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 w-48 text-right">
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+
+                        <!-- Save Feedback -->
+                        <div id="props-save-success" class="hidden mt-5 p-3 bg-emerald-600/10 border border-emerald-600/30 rounded-xl">
+                            <p class="text-emerald-400 text-sm"><i class="fa-solid fa-check mr-2"></i>Properties saved successfully</p>
+                        </div>
+                        <div id="props-save-error" class="hidden mt-5 p-3 bg-red-600/10 border border-red-600/30 rounded-xl">
+                            <p class="text-red-400 text-sm"><i class="fa-solid fa-xmark mr-2"></i><span id="props-save-error-text"></span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====================================================== -->
+        <!-- SECTION: NETWORK -->
+        <!-- ====================================================== -->
+        <div id="section-network" class="section-content hidden">
+            <div class="px-6 pb-6">
+                <div class="glass-card rounded-2xl p-6">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between mb-6">
                         <div>
-                            <div class="text-sm text-white font-medium">Enable Autonomous Updates</div>
-                            <div class="text-xs text-zinc-500">Automatically sync with GitHub repository</div>
+                            <h3 class="text-lg font-bold text-white">
+                                <i class="fa-solid fa-network-wired text-purple-400 mr-2"></i>
+                                Network & Port Manager
+                            </h3>
+                            <p class="text-xs text-zinc-500 mt-0.5">Monitor network status and manage port allocations</p>
                         </div>
-                        <div class="toggle-switch" id="auto-update-toggle" onclick="toggleAutoUpdate()"></div>
+                        <button onclick="refreshNetworkStatus()" class="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-sm rounded-xl transition flex items-center gap-2">
+                            <i class="fa-solid fa-sync" id="network-refresh-icon"></i>
+                            Refresh
+                        </button>
                     </div>
-                    
-                    <div class="text-xs text-zinc-500">
-                        <i class="fa-solid fa-info-circle mr-1"></i>
-                        When enabled, the panel will check for updates every 30 minutes and install them automatically.
+
+                    <!-- IP Cards Row -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div class="bg-zinc-900/50 rounded-xl p-4 border border-zinc-800/40">
+                            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-2">Public IP</div>
+                            <div class="text-base font-mono font-bold text-white" id="net-public-ip">&#8212;</div>
+                        </div>
+                        <div class="bg-zinc-900/50 rounded-xl p-4 border border-zinc-800/40">
+                            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-2">Local IP</div>
+                            <div class="text-base font-mono font-bold text-white" id="net-local-ip">&#8212;</div>
+                        </div>
+                        <div class="bg-zinc-900/50 rounded-xl p-4 border border-zinc-800/40">
+                            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-2">Hostname</div>
+                            <div class="text-base font-mono font-bold text-white" id="net-hostname">&#8212;</div>
+                        </div>
+                    </div>
+
+                    <!-- Port Status Table -->
+                    <div class="mb-6">
+                        <h4 class="text-sm font-bold text-zinc-300 mb-3">Port Status</h4>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="border-b border-zinc-800/50">
+                                        <th class="text-left text-zinc-500 font-medium py-3 px-4">Port</th>
+                                        <th class="text-left text-zinc-500 font-medium py-3 px-4">Service</th>
+                                        <th class="text-left text-zinc-500 font-medium py-3 px-4">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="default-ports-table">
+                                    <tr><td colspan="3" class="text-zinc-700 py-10 text-center">Loading scan...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Active Allocations Table -->
+                    <div class="mb-6">
+                        <h4 class="text-sm font-bold text-zinc-300 mb-3">Active Allocations</h4>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="border-b border-zinc-800/50">
+                                        <th class="text-left text-zinc-500 font-medium py-3 px-4">Port</th>
+                                        <th class="text-left text-zinc-500 font-medium py-3 px-4">Service</th>
+                                        <th class="text-left text-zinc-500 font-medium py-3 px-4">Description</th>
+                                        <th class="text-left text-zinc-500 font-medium py-3 px-4">Allocated</th>
+                                        <th class="text-left text-zinc-500 font-medium py-3 px-4">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="allocations-table">
+                                    <tr><td colspan="5" class="text-zinc-700 py-8 text-center">No active allocations</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Allocate Port Form -->
+                    <div class="border-t border-zinc-800/50 pt-5">
+                        <h4 class="text-sm font-bold text-zinc-300 mb-3">Allocate New Port</h4>
+                        <div class="flex flex-wrap items-end gap-3">
+                            <div>
+                                <label class="block text-xs text-zinc-500 mb-1.5">Port (1&#8211;65535)</label>
+                                <input type="number" id="new-port" min="1" max="65535" placeholder="25565"
+                                       class="input-field w-28 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-mono text-zinc-200">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-zinc-500 mb-1.5">Service Name</label>
+                                <input type="text" id="new-service" placeholder="Minecraft Server"
+                                       class="input-field w-44 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-zinc-500 mb-1.5">Description</label>
+                                <input type="text" id="new-description" placeholder="Optional note"
+                                       class="input-field w-52 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200">
+                            </div>
+                            <button onclick="allocatePort()" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition flex items-center gap-2">
+                                <i class="fa-solid fa-plus text-xs"></i>
+                                Allocate
+                            </button>
+                        </div>
+                        <div id="allocate-error" class="text-red-400 text-xs mt-2 hidden"></div>
+                        <div id="allocate-success" class="text-green-400 text-xs mt-2 hidden"></div>
                     </div>
                 </div>
-                
-                <!-- Update Status -->
-                <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-lg font-semibold text-white mb-4">
-                        <i class="fa-solid fa-code-branch text-purple-400 mr-2"></i>
-                        System Version
-                    </h3>
-                    
-                    <div class="flex items-center gap-3 mb-4">
-                        <span id="update-badge" class="update-badge uptodate">CHECKING...</span>
-                    </div>
-                    
-                    <div class="space-y-3">
-                        <div class="flex justify-between items-center py-2 border-b border-zinc-800">
-                            <span class="text-xs text-zinc-500">Current Commit</span>
-                            <span id="current-commit" class="text-xs font-mono text-zinc-300">---</span>
+            </div>
+        </div>
+
+        <!-- ====================================================== -->
+        <!-- SECTION: SETTINGS -->
+        <!-- ====================================================== -->
+        <div id="section-settings" class="section-content hidden">
+            <div class="px-6 pb-6">
+                <div class="glass-card rounded-2xl p-6">
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="w-10 h-10 rounded-xl bg-purple-600/20 flex items-center justify-center">
+                            <i class="fa-solid fa-gear text-purple-400 text-lg"></i>
                         </div>
-                        <div class="flex justify-between items-center py-2 border-b border-zinc-800">
-                            <span class="text-xs text-zinc-500">Latest Remote</span>
-                            <span id="latest-commit" class="text-xs font-mono text-zinc-300">---</span>
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Panel Settings</h3>
+                            <p class="text-xs text-zinc-500 mt-0.5">Configure server launch parameters</p>
                         </div>
                     </div>
-                    
-                    <div class="flex gap-3 mt-4">
-                        <button onclick="checkForUpdates()" id="btn-check-update" class="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium rounded-lg transition flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-search spinner hidden" id="check-spinner"></i>
-                            <i class="fa-solid fa-sync" id="check-icon"></i>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- RAM Allocation -->
+                        <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                            <label class="block text-sm font-semibold text-zinc-300 mb-3">
+                                <i class="fa-solid fa-memory text-purple-400 mr-2 text-xs"></i>
+                                Max RAM Allocation
+                            </label>
+                            <select id="setting-ram" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                <option value="2G">2 GB</option>
+                                <option value="4G">4 GB</option>
+                                <option value="6G">6 GB</option>
+                                <option value="8G">8 GB</option>
+                                <option value="12G">12 GB</option>
+                                <option value="16G">16 GB</option>
+                            </select>
+                            <p class="text-xs text-zinc-600 mt-2">Maximum memory allocated to the Minecraft server process</p>
+                        </div>
+
+                        <!-- Java Path -->
+                        <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                            <label class="block text-sm font-semibold text-zinc-300 mb-3">
+                                <i class="fa-solid fa-terminal text-purple-400 mr-2 text-xs"></i>
+                                Java Executable Path
+                            </label>
+                            <input type="text" id="setting-java" placeholder="java"
+                                   class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200">
+                            <p class="text-xs text-zinc-600 mt-2">Path to the Java runtime executable (e.g., /usr/bin/java)</p>
+                        </div>
+                    </div>
+
+                    <div id="settings-success" class="hidden mt-4 p-3 bg-emerald-600/10 border border-emerald-600/30 rounded-xl">
+                        <p class="text-emerald-400 text-sm"><i class="fa-solid fa-check mr-2"></i>Settings saved successfully</p>
+                    </div>
+
+                    <div class="mt-5 flex justify-end">
+                        <button onclick="saveSettings()" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition flex items-center gap-2">
+                            <i class="fa-solid fa-save text-xs"></i>
+                            Save Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====================================================== -->
+        <!-- SECTION: SYSTEM UPDATES -->
+        <!-- ====================================================== -->
+        <div id="section-updates" class="section-content hidden">
+            <div class="px-6 pb-6">
+                <div class="glass-card rounded-2xl p-6">
+                    <!-- Header -->
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="w-10 h-10 rounded-xl bg-purple-600/20 flex items-center justify-center">
+                            <i class="fa-solid fa-rocket text-purple-400 text-lg"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-bold text-white">System Update Manager</h3>
+                            <p class="text-xs text-zinc-500 mt-0.5">Deploy latest PurpleMC Panel release from GitHub</p>
+                        </div>
+                    </div>
+
+                    <!-- Version Transition Display -->
+                    <div class="flex items-center justify-between p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/40 mb-5">
+                        <div class="flex items-center gap-8">
+                            <div class="text-center">
+                                <div class="text-xs text-zinc-600 uppercase tracking-widest mb-2">Current</div>
+                                <div id="update-current-version" class="text-base font-mono font-bold text-red-400">v1.0.3</div>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-px bg-zinc-700"></div>
+                                <i class="fa-solid fa-arrow-right text-zinc-700"></i>
+                                <div class="w-10 h-px bg-zinc-700"></div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-xs text-zinc-600 uppercase tracking-widest mb-2">Latest</div>
+                                <div id="update-latest-version" class="text-base font-mono font-bold text-emerald-400">v1.0.3</div>
+                            </div>
+                        </div>
+                        <div id="update-badge-container"></div>
+                    </div>
+
+                    <!-- Update Status Alert -->
+                    <div id="update-status-alert" class="mb-5 hidden">
+                        <div id="update-alert-box" class="flex items-start gap-3 p-4 rounded-xl border">
+                            <div class="flex-shrink-0 mt-0.5">
+                                <i id="update-alert-icon" class="fa-solid text-lg"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div id="update-alert-title" class="text-sm font-semibold mb-1"></div>
+                                <div id="update-alert-desc" class="text-xs opacity-80"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex gap-3 mb-5">
+                        <button onclick="runUpdateCheck()" id="btn-check-update"
+                                class="flex-1 px-5 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-search" id="check-icon"></i>
+                            <i class="fa-solid fa-circle-notch spinner hidden" id="check-spinner"></i>
                             Check for Updates
                         </button>
-                        <button onclick="installUpdate()" id="btn-install-update" class="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium rounded-lg transition opacity-50 cursor-not-allowed" disabled>
-                            <i class="fa-solid fa-download mr-1"></i>
-                            Install Update
+                        <button onclick="initiateUpdate()" id="btn-install-update" disabled
+                                class="flex-1 px-5 py-3 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-25 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-download"></i>
+                            Install System Update
                         </button>
                     </div>
-                </div>
-            </div>
-            
-            <!-- Update Modal -->
-            <div id="update-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 hidden">
-                <div class="glass-card rounded-xl p-6 max-w-md w-full mx-4">
-                    <h3 class="text-lg font-semibold text-white mb-4">
-                        <i class="fa-solid fa-exclamation-triangle text-amber-500 mr-2"></i>
-                        Confirm Update
-                    </h3>
-                    <p class="text-sm text-zinc-400 mb-4">
-                        Installing an update will restart the panel. Players currently connected to the Minecraft server will NOT be affected, but the panel will be briefly unavailable.
-                    </p>
-                    <div class="flex gap-3">
-                        <button onclick="closeUpdateModal()" class="flex-1 px-4 py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 text-sm font-medium rounded-lg transition">
-                            Cancel
+
+                    <!-- ================================================================ -->
+                    <!-- LIVE DEPLOYMENT MONITOR — Glassmorphic streaming terminal UI -->
+                    <!-- ================================================================ -->
+
+                    <!-- Step Progress Indicator Row -->
+                    <div id="update-step-indicator" class="hidden mb-5">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xs text-zinc-600 uppercase tracking-widest font-semibold">Deployment Phases</span>
+                            <span id="step-label" class="text-xs font-mono text-purple-400">Initializing...</span>
+                        </div>
+                        <div class="grid grid-cols-7 gap-1.5">
+                            <div id="step-indicator-1" class="h-1.5 bg-zinc-800 rounded-full transition-all duration-500 step-glow"></div>
+                            <div id="step-indicator-2" class="h-1.5 bg-zinc-800 rounded-full transition-all duration-500"></div>
+                            <div id="step-indicator-3" class="h-1.5 bg-zinc-800 rounded-full transition-all duration-500"></div>
+                            <div id="step-indicator-4" class="h-1.5 bg-zinc-800 rounded-full transition-all duration-500"></div>
+                            <div id="step-indicator-5" class="h-1.5 bg-zinc-800 rounded-full transition-all duration-500"></div>
+                            <div id="step-indicator-6" class="h-1.5 bg-zinc-800 rounded-full transition-all duration-500"></div>
+                            <div id="step-indicator-7" class="h-1.5 bg-zinc-800 rounded-full transition-all duration-500"></div>
+                        </div>
+                        <div class="flex justify-between mt-1.5">
+                            <span class="text-[10px] text-zinc-700">1</span>
+                            <span class="text-[10px] text-zinc-700">2</span>
+                            <span class="text-[10px] text-zinc-700">3</span>
+                            <span class="text-[10px] text-zinc-700">4</span>
+                            <span class="text-[10px] text-zinc-700">5</span>
+                            <span class="text-[10px] text-zinc-700">6</span>
+                            <span class="text-[10px] text-zinc-700">7</span>
+                        </div>
+                    </div>
+
+                    <!-- Glassmorphic Live Deployment Terminal -->
+                    <div id="update-terminal-container" class="hidden mb-5">
+                        <!-- Terminal Header Bar -->
+                        <div class="flex items-center justify-between px-4 py-2.5 bg-zinc-900/70 rounded-t-2xl border border-b-0 border-zinc-800/40">
+                            <div class="flex items-center gap-2">
+                                <div class="flex gap-1.5">
+                                    <div class="w-2.5 h-2.5 rounded-full bg-red-500/70"></div>
+                                    <div class="w-2.5 h-2.5 rounded-full bg-yellow-500/70"></div>
+                                    <div class="w-2.5 h-2.5 rounded-full bg-green-500/70"></div>
+                                </div>
+                                <span class="text-xs text-zinc-600 font-mono ml-2">purple-mc-panel ~ deployment</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span id="terminal-live-dot" class="w-2 h-2 rounded-full bg-emerald-500 status-pulse"></span>
+                                <span class="text-xs text-zinc-600 font-mono">LIVE</span>
+                            </div>
+                        </div>
+
+                        <!-- Terminal Output Area -->
+                        <div id="update-terminal-output"
+                             class="bg-black/85 backdrop-blur-sm border border-t-0 border-zinc-800/40 p-4 rounded-b-2xl overflow-y-auto"
+                             style="min-height: 200px; max-height: 280px; font-family: 'JetBrains Mono', monospace;">
+                            <div id="update-terminal-lines" class="space-y-0.5">
+                                <!-- Live output lines stream here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Overall Deployment Progress Bar -->
+                    <div id="update-progress-container" class="hidden mb-5 p-4 bg-zinc-900/40 rounded-xl border border-zinc-800/30">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-spinner fa-spin text-purple-400 text-sm" id="deploy-spinner"></i>
+                                <span id="deploy-phase-label" class="text-sm font-semibold text-zinc-300">Preparing deployment...</span>
+                            </div>
+                            <span id="deploy-percent-text" class="text-sm font-mono text-purple-400">0%</span>
+                        </div>
+                        <div class="h-2 bg-zinc-800 rounded-full overflow-hidden mb-2">
+                            <div id="deploy-progress-bar" class="h-full rounded-full bg-gradient-to-r from-purple-600 to-magenta-500 transition-all duration-700" style="width: 0%"></div>
+                        </div>
+                        <div class="flex items-center justify-between text-xs text-zinc-600">
+                            <span id="deploy-eta-text">Connecting to deployment service...</span>
+                            <span id="deploy-time-text"></span>
+                        </div>
+                    </div>
+
+                    <!-- Deployment Complete Overlay -->
+                    <div id="update-complete-container" class="hidden mb-5 p-6 bg-emerald-900/10 rounded-xl border border-emerald-600/30 text-center">
+                        <div class="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
+                            <i class="fa-solid fa-circle-check text-emerald-400 text-3xl"></i>
+                        </div>
+                        <h4 class="text-lg font-bold text-emerald-300 mb-2">Deployment Complete!</h4>
+                        <p id="update-complete-message" class="text-sm text-emerald-300/70 mb-4">Panel is restarting. Refreshing automatically...</p>
+                        <div class="flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-circle-notch spinner text-emerald-400"></i>
+                            <span id="update-reload-countdown" class="text-sm text-emerald-400 font-mono">Reloading in 3s...</span>
+                        </div>
+                    </div>
+
+                    <!-- Deployment Failed Overlay -->
+                    <div id="update-failed-container" class="hidden mb-5 p-6 bg-red-900/10 rounded-xl border border-red-600/30 text-center">
+                        <div class="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-4">
+                            <i class="fa-solid fa-triangle-exclamation text-red-400 text-3xl"></i>
+                        </div>
+                        <h4 class="text-lg font-bold text-red-300 mb-2">Deployment Failed</h4>
+                        <p id="update-failed-message" class="text-sm text-red-300/70 mb-4">The panel has been automatically rolled back to the previous version.</p>
+                        <button onclick="resetUpdateUI()" class="mt-2 px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-semibold rounded-xl transition">
+                            <i class="fa-solid fa-arrow-left mr-2"></i>Back to Update Manager
                         </button>
-                        <button onclick="confirmUpdate()" class="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium rounded-lg transition">
-                            Continue
-                        </button>
+                    </div>
+
+                    <!-- Historical Deployment Log -->
+                    <div class="bg-zinc-950/60 rounded-xl border border-zinc-800/40 p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xs text-zinc-600 uppercase tracking-widest font-semibold">Deployment History</span>
+                            <button onclick="clearDeploymentLog()" class="text-xs text-zinc-700 hover:text-zinc-500 transition">
+                                <i class="fa-solid fa-trash-can mr-1"></i> Clear
+                            </button>
+                        </div>
+                        <div id="deployment-log" class="font-mono text-xs text-zinc-600 max-h-28 overflow-y-auto space-y-1 leading-relaxed">
+                            <div class="text-zinc-800">Waiting for deployment to begin...</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+
     </main>
 
+    <!-- ========================================================== -->
+    <!-- MODAL: FILE EDITOR -->
+    <!-- ========================================================== -->
+    <div id="file-editor-modal" class="fixed inset-0 modal-overlay flex items-center justify-center z-50 hidden">
+        <div class="glass-card rounded-2xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col animate-slide-up">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800/40">
+                <div class="flex items-center gap-3">
+                    <i class="fa-solid fa-file-code text-purple-400 text-lg"></i>
+                    <div>
+                        <div id="editor-file-name" class="text-sm font-semibold text-white">filename.yml</div>
+                        <div id="editor-file-path" class="text-xs text-zinc-600 font-mono">path/to/file</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="editor-status" class="text-xs text-zinc-600"></span>
+                    <button onclick="closeFileEditor()" class="w-8 h-8 flex items-center justify-center text-zinc-600 hover:text-white hover:bg-zinc-800 rounded-lg transition">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <!-- Modal Body: Text Editor -->
+            <div class="flex-1 overflow-hidden">
+                <textarea id="file-editor-content"
+                          class="w-full h-80 bg-black/90 border-none text-zinc-200 p-5 text-sm font-mono focus:outline-none leading-relaxed resize-none"
+                          spellcheck="false" placeholder="Loading..."></textarea>
+            </div>
+            <!-- Modal Footer -->
+            <div class="flex items-center justify-between px-5 py-3.5 border-t border-zinc-800/40 bg-zinc-950/40">
+                <div class="text-xs text-zinc-600">
+                    <span id="editor-lines">0</span> lines &nbsp;|&nbsp; <span id="editor-chars">0</span> chars
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="closeFileEditor()" class="px-4 py-2 border border-zinc-700 text-zinc-500 hover:text-white hover:bg-zinc-800 text-sm font-medium rounded-lg transition">
+                        Cancel
+                    </button>
+                    <button onclick="saveFileFromEditor()" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-lg transition flex items-center gap-2">
+                        <i class="fa-solid fa-save text-xs"></i>
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- MODAL: CREATE NEW FILE / FOLDER -->
+    <!-- ========================================================== -->
+    <div id="create-item-modal" class="fixed inset-0 modal-overlay flex items-center justify-center z-50 hidden">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full mx-4 animate-slide-up">
+            <h3 class="text-lg font-bold text-white mb-1" id="create-modal-title">
+                <i class="fa-solid fa-folder-plus text-yellow-400 mr-2"></i>New Folder
+            </h3>
+            <p class="text-xs text-zinc-600 mb-5" id="create-modal-subtitle">Enter a name for the new folder</p>
+            <div class="mb-5">
+                <label class="block text-xs text-zinc-500 mb-1.5" id="create-label">Name</label>
+                <input type="text" id="create-item-name"
+                       class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200"
+                       placeholder="my-folder">
+            </div>
+            <div class="flex gap-3">
+                <button onclick="closeCreateModal()" class="flex-1 px-4 py-2.5 border border-zinc-700 text-zinc-500 hover:text-white hover:bg-zinc-800 text-sm font-semibold rounded-xl transition">
+                    Cancel
+                </button>
+                <button onclick="confirmCreateItem()" class="flex-1 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition">
+                    Create
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- JAVASCRIPT: ALL CLIENT LOGIC -->
+    <!-- ========================================================== -->
     <script>
+        // ================================================================
+        // SOCKET.IO CONNECTION & GLOBAL STATE
+        // ================================================================
         const socket = io();
-        
+
         const statusIndicator = document.getElementById('status-indicator');
         const statusText = document.getElementById('status-text');
+        const serverStatusBadge = document.getElementById('server-status-badge');
+        const statusDot = document.getElementById('status-dot');
+        const statusLabel = document.getElementById('status-label');
         const cpuText = document.getElementById('cpu-text');
         const cpuBar = document.getElementById('cpu-bar');
         const ramText = document.getElementById('ram-text');
         const ramBar = document.getElementById('ram-bar');
         const uptimeText = document.getElementById('uptime-text');
         const consoleOutput = document.getElementById('console-output');
+        const consolePreview = document.getElementById('console-preview');
         const commandInput = document.getElementById('command-input');
-        const serverIp = document.getElementById('server-ip');
-        
-        let isOnline = false;
-        let logCount = 0;
-        const MAX_LINES = 500;
+        const serverIpEl = document.getElementById('server-ip');
 
-        function addLog(message, type = 'default') {
+        // Tracks whether the console-history event has been received this session.
+        // Prevents duplicate rendering when history + live events both fire.
+        let historyReconstructed = false;
+        let historyLengthAtConnect = 0;
+        let currentProperties = {};
+
+        // ================================================================
+        // CONSOLE LOGGING UTILITY
+        // ================================================================
+
+        /**
+         * addLog — appends a single line to both the full console
+         * and the dashboard preview pane. Each line is a DOM element so
+         * it can be individually styled by the CSS terminal-line class.
+         *
+         * The history-duplication guard works as follows:
+         *   1. When socket.on('console-history') fires, historyReconstructed
+         *      becomes true and historyLengthAtConnect records how many
+         *      entries were in the backend buffer at that moment.
+         *   2. addLog() then skips rendering any lines beyond that count
+         *      when the live 'console' event fires (those were already shown
+         *      by renderHistory).  Lines within the history window are still
+         *      rendered live so multiple clients stay in sync.
+         *   3. If addLog is called for any other reason (non socket event),
+         *      we reset historyReconstructed to allow normal rendering.
+         *
+         * @param {string} message  - The raw line text (should be ANSI-stripped
+         *                            by the caller when coming from history).
+         * @param {string} type     - CSS class suffix: default|error|warn|
+         *                            info|success|system|command
+         * @param {boolean} fromHistory - True when called from renderHistory
+         *                            so the duplicate-guard applies.
+         */
+        function addLog(message, type, fromHistory) {
+            // If this line is part of the reconstructed history batch, and we
+            // have already reconstructed, skip it to prevent duplication.
+            // The backend sends exactly the same buffer on 'console-history'
+            // that it has been accumulating on 'console' events, so live lines
+            // that arrived before our connection will appear in BOTH events.
+            if (fromHistory && historyReconstructed) return;
+
+            // Mark that we have started appending live lines.
+            historyReconstructed = false;
+
             const line = document.createElement('div');
-            line.className = `terminal-line ${type} text-sm`;
+            line.className = 'terminal-line ' + type + ' text-sm';
             line.textContent = message;
-            consoleOutput.appendChild(line);
-            
-            logCount++;
-            if (logCount > MAX_LINES) {
-                consoleOutput.removeChild(consoleOutput.firstChild);
-                logCount--;
-            }
-            
+
+            // Write to both the full console and the mini dashboard preview.
+            [consoleOutput, consolePreview].forEach(function(target) {
+                if (target) {
+                    const clone = line.cloneNode(true);
+                    target.appendChild(clone);
+                }
+            });
+
+            // Auto-scroll both panes to the bottom after every new line.
             consoleOutput.scrollTop = consoleOutput.scrollHeight;
+            if (consolePreview) {
+                consolePreview.scrollTop = consolePreview.scrollHeight;
+            }
         }
 
         function getLogType(line) {
             const lower = line.toLowerCase();
-            if (lower.includes('[error]') || lower.includes('exception')) return 'error';
+            if (lower.includes('[error]') || lower.includes('exception') || lower.includes('fatal')) return 'error';
             if (lower.includes('[warn]') || lower.includes('warning')) return 'warn';
             if (lower.includes('[info]')) return 'info';
             if (lower.includes('done') || lower.includes('complete') || lower.includes('success')) return 'success';
-            if (lower.includes('system') || lower.includes('started') || lower.includes('stopped')) return 'system';
+            if (lower.includes('system') || lower.includes('started') || lower.includes('stopped') || lower.includes('running')) return 'system';
             return 'default';
         }
 
-        socket.on('connect', () => {
-            addLog('» Panel connected', 'system');
-        });
+        // ================================================================
+        // SOCKET.IO EVENT HANDLERS
+        // ================================================================
 
-        socket.on('status', (status) => {
-            isOnline = status === 'online';
-            updateStatus(isOnline);
-        });
-
-        socket.on('console', (data) => {
-            const lines = data.trim().split('\n');
-            lines.forEach(line => {
-                if (line.trim()) {
-                    addLog(line, getLogType(line));
-                }
-            });
-        });
-
-        socket.on('stats', (stats) => {
-            updateMetrics(stats.cpu, stats.memory);
-        });
-
-        function updateStatus(online) {
-            if (online) {
-                statusIndicator.className = 'w-2 h-2 rounded-full bg-emerald-500 status-pulse';
-                statusText.textContent = 'RUNNING';
-                statusText.className = 'text-xl font-semibold text-emerald-500';
-            } else {
-                statusIndicator.className = 'w-2 h-2 rounded-full bg-red-500';
-                statusText.textContent = 'OFFLINE';
-                statusText.className = 'text-xl font-semibold text-red-500';
-                uptimeText.textContent = '--:--:--';
-            }
-        }
-
-        function updateMetrics(cpu, ram) {
-            cpuText.textContent = cpu + '%';
-            cpuBar.style.width = cpu + '%';
-            
-            if (cpu > 85) {
-                cpuBar.className = 'h-full rounded-full progress-bar bg-red-500';
-            } else if (cpu > 60) {
-                cpuBar.className = 'h-full rounded-full progress-bar bg-amber-500';
-            } else {
-                cpuBar.className = 'h-full rounded-full progress-bar bg-zinc-400';
-            }
-
-            const ramGB = (ram / 1024).toFixed(2);
-            const ramPercent = Math.min((ram / 2048) * 100, 100);
-            ramText.textContent = `${ramGB} GB / 2 GB`;
-            ramBar.style.width = ramPercent + '%';
-            
-            if (ramPercent > 85) {
-                ramBar.className = 'h-full rounded-full progress-bar bg-red-500';
-            } else if (ramPercent > 60) {
-                ramBar.className = 'h-full rounded-full progress-bar bg-amber-500';
-            } else {
-                ramBar.className = 'h-full rounded-full progress-bar bg-purple-500';
-            }
-        }
-
-        function updateUptime(uptime) {
-            if (!uptime) {
-                uptimeText.textContent = '--:--:--';
+        /**
+         * renderHistory — reconstructs the entire rolling log buffer on
+         * page load or browser refresh.
+         *
+         * Strategy to avoid duplicates:
+         *   - On connection, socket emits 'console-history' with up to 500
+         *     structured entries: { text, type, timestamp }.
+         *   - We batch-insert all of them before any 'console' events fire.
+         *   - historyReconstructed is set to true, and fromHistory=true is
+         *     passed to addLog() so that if a live 'console' event arrives
+         *     with overlapping lines (lines that were already in the buffer
+         *     before this client connected), addLog skips them silently.
+         *
+         * ANSI stripping note: the backend already sent us clean .text
+         * fields (ANSI stripped by stripAnsi() in app.js), so no further
+         * processing is needed here.
+         *
+         * @param {Array}  entries  - Array of { text, type, timestamp }
+         * @param {number} fromCount - How many entries were in the buffer
+         *                             when history was captured. Used to
+         *                             detect the overlap window for dedup.
+         */
+        function renderHistory(entries, fromCount) {
+            if (!entries || !Array.isArray(entries) || entries.length === 0) {
                 return;
             }
+
+            // Build the client-side mirror of the logBuffer so that subsequent
+            // live 'console' events can look up lineIndex by raw text to avoid
+            // rendering duplicates from the overlap window.
+            window.consoleLogBuffer = [];
+            for (let i = 0; i < entries.length; i++) {
+                window.consoleLogBuffer.push({
+                    raw: entries[i].text || '',
+                    text: entries[i].text || '',
+                    lineIndex: i
+                });
+            }
+
+            // Record the buffer size at time of capture so we know where the
+            // overlap window starts for subsequent live event deduplication.
+            historyLengthAtConnect = fromCount;
+
+            // Mark that history has been placed on screen. From this point
+            // forward, any live 'console' event lines with index < fromCount
+            // will be skipped by the addLog duplicate guard.
+            historyReconstructed = true;
+
+            // Batch-insert all history lines into both terminal containers.
+            // This is much more efficient than individual addLog calls.
+            const fragmentFull = document.createDocumentFragment();
+            const fragmentPreview = document.createDocumentFragment();
+
+            for (let i = 0; i < entries.length; i++) {
+                const entry = entries[i];
+                // Ensure we always have a valid type string — default to 'default'
+                // if the backend sent an unexpected classification.
+                const safeType = String(entry.type || 'default').toLowerCase();
+
+                const elFull = document.createElement('div');
+                elFull.className = 'terminal-line ' + safeType + ' text-sm';
+                elFull.textContent = entry.text || '';
+
+                const elPreview = elFull.cloneNode(true);
+
+                fragmentFull.appendChild(elFull);
+                fragmentPreview.appendChild(elPreview);
+            }
+
+            // Append the fragment to both containers in a single DOM operation.
+            consoleOutput.appendChild(fragmentFull);
+            consolePreview.appendChild(fragmentPreview);
+
+            // Auto-scroll to the very bottom so the user sees the latest
+            // line in the buffer immediately after page load.
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+            consolePreview.scrollTop = consolePreview.scrollHeight;
+        }
+
+        socket.on('connect', function() {
+            addLog('\u00bb PurpleMC Panel connected', 'system');
+            // Reset flags so a fresh history reconstruction happens on reconnect.
+            historyReconstructed = false;
+            historyLengthAtConnect = 0;
+        });
+
+        socket.on('disconnect', function() {
+            addLog('\u00bb Panel disconnected', 'error');
+        });
+
+        /**
+         * console-history — emitted by the server ONLY on initial connection.
+         * Contains the entire rolling log buffer at the moment of handshake.
+         * Entries are already ANSI-stripped and classified by the backend.
+         */
+        socket.on('console-history', function(entries) {
+            renderHistory(entries, (entries && Array.isArray(entries)) ? entries.length : 0);
+        });
+
+        socket.on('status', function(status) {
+            isOnline = (status === 'online');
+            updateStatusDisplay(isOnline);
+        });
+
+        socket.on('console', function(data) {
+            /**
+             * Live console stream — lines arriving WHILE the client is
+             * connected to the server after the initial history dump.
+             *
+             * Deduplication strategy (avoid double-rendering overlap):
+             *   The server emits raw chunks from mcProcess stdout/stderr.
+             *   The logBuffer entry lineIndex was set at pushToLogBuffer time.
+             *   We count how many lines arrive here (liveLineCount) and
+             *   skip the first N live entries where N is historyLengthAtConnect,
+             *   because those same entries were already placed by renderHistory.
+             *
+             *   Example: historyLengthAtConnect = 50 (50 entries dumped)
+             *            liveLineCount starts at 0
+             *            Line 0 of live stream: lineIndex=0  -> SKIP (in history)
+             *            Line 49 of live stream: lineIndex=49 -> SKIP (in history)
+             *            Line 50 of live stream: lineIndex=50 -> RENDER
+             *
+             * This ensures clean transitions regardless of how fast the
+             * server was producing output at the moment of client connection.
+             */
+            const lines = data.trim().split('\n');
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (line.trim()) {
+                    // Get the line's original index from the logBuffer so we
+                    // can detect whether it falls within the history window.
+                    // The server emits each line individually, so we can match
+                    // by iterating logBuffer backwards to find the matching text.
+                    const liveLineIndex = getLiveLineIndex(line);
+                    if (liveLineIndex !== null && liveLineIndex < historyLengthAtConnect) {
+                        // This line is within the history window — it was already
+                        // rendered by renderHistory(). Skip to prevent duplication.
+                        continue;
+                    }
+                    // Strip any ANSI codes that may still be in the raw chunk
+                    // (in case the server emitted raw ANSI directly).
+                    const cleanLine = stripAnsiClient(line);
+                    addLog(cleanLine, getLogType(cleanLine));
+                }
+            }
+        });
+
+        /**
+         * getLiveLineIndex — searches the browser-side mirror of the logBuffer
+         * (stored as an array via window.consoleLogBuffer) for the matching line
+         * and returns its lineIndex, or null if not found.
+         *
+         * The server sends each live chunk as a separate socket.emit('console'),
+         * so we must look up the index per line. We iterate backwards for speed
+         * since recent lines are more likely to match.
+         */
+        function getLiveLineIndex(rawLine) {
+            const buffer = window.consoleLogBuffer || [];
+            for (let i = buffer.length - 1; i >= 0; i--) {
+                if (buffer[i].raw === rawLine || buffer[i].text === stripAnsiClient(rawLine)) {
+                    return buffer[i].lineIndex;
+                }
+            }
+            return null;
+        }
+
+        /**
+         * stripAnsiClient — client-side ANSI escape sequence stripper.
+         * Used for live console events where the raw chunk may still contain
+         * ANSI codes that the server did not strip before emitting.
+         */
+        function stripAnsiClient(str) {
+            return str.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
+        }
+
+        socket.on('stats', function(stats) {
+            updateMetricsDisplay(stats.cpu, stats.memory);
+            updateConsoleMetrics(stats);
+        });
+
+        // ================================================================
+        // STATUS & METRICS DISPLAY UPDATES
+        // ================================================================
+        function updateStatusDisplay(online) {
+            const startBtn = document.getElementById('btn-start');
+            const stopBtn = document.getElementById('btn-stop');
+            const restartBtn = document.getElementById('btn-restart');
+
+            if (online) {
+                statusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 status-pulse';
+                statusText.textContent = 'RUNNING';
+                statusText.className = 'text-2xl font-bold text-emerald-400';
+                serverStatusBadge.textContent = 'ONLINE';
+                serverStatusBadge.className = 'tab-badge online';
+                statusDot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+                statusLabel.textContent = 'Online';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                restartBtn.disabled = false;
+            } else {
+                statusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+                statusText.textContent = 'OFFLINE';
+                statusText.className = 'text-2xl font-bold text-red-400';
+                serverStatusBadge.textContent = 'OFFLINE';
+                serverStatusBadge.className = 'tab-badge offline';
+                statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
+                statusLabel.textContent = 'Offline';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                restartBtn.disabled = true;
+                uptimeText.textContent = '--:--:--';
+            }
+        }
+
+        function updateMetricsDisplay(cpu, memory) {
+            cpuText.textContent = cpu + '%';
+            cpuBar.style.width = cpu + '%';
+            cpuBar.className = 'h-full rounded-full progress-bar ' + (cpu > 85 ? 'bg-red-500' : cpu > 60 ? 'bg-amber-500' : 'bg-zinc-500');
+
+            const ramGB = (memory / 1024).toFixed(1);
+            const ramPercent = Math.min((memory / 2048) * 100, 100);
+            ramText.textContent = ramGB + ' / 2 GB';
+            ramBar.style.width = ramPercent + '%';
+            ramBar.className = 'h-full rounded-full progress-bar ' + (ramPercent > 85 ? 'bg-red-500' : ramPercent > 60 ? 'bg-amber-500' : 'bg-purple-600');
+        }
+
+        function updateConsoleMetrics(stats) {
+            // CPU card
+            const cpuPercentEl = document.getElementById('console-cpu-percent');
+            const cpuBarEl = document.getElementById('console-cpu-bar');
+            const cpuProcessEl = document.getElementById('console-cpu-process');
+            const cpuCoresEl = document.getElementById('console-cpu-cores');
+
+            if (cpuPercentEl && stats.cpu !== undefined) {
+                cpuPercentEl.textContent = stats.cpu + '%';
+                cpuBarEl.style.width = Math.min(stats.cpu, 100) + '%';
+                cpuBarEl.className = 'h-full rounded-full progress-bar ' + (stats.cpu > 85 ? 'bg-red-500' : stats.cpu > 60 ? 'bg-amber-500' : 'bg-emerald-500');
+                cpuProcessEl.textContent = 'Process: ' + stats.cpu + '%';
+            }
+            if (cpuCoresEl && stats.system && stats.system.cpu) {
+                cpuCoresEl.textContent = 'Cores: ' + stats.system.cpu.cores;
+            }
+
+            // RAM card
+            const ramPercentEl = document.getElementById('console-ram-percent');
+            const ramBarEl = document.getElementById('console-ram-bar');
+            const ramProcessEl = document.getElementById('console-ram-process');
+            const ramSystemEl = document.getElementById('console-ram-system');
+
+            if (ramPercentEl && stats.memory !== undefined) {
+                const sysRam = stats.system && stats.system.ram ? stats.system.ram : null;
+                const ramPercent = sysRam ? sysRam.usagePercent : 0;
+                ramPercentEl.textContent = ramPercent + '%';
+                ramBarEl.style.width = Math.min(ramPercent, 100) + '%';
+                ramBarEl.className = 'h-full rounded-full progress-bar ' + (ramPercent > 85 ? 'bg-red-500' : ramPercent > 60 ? 'bg-amber-500' : 'bg-purple-500');
+                ramProcessEl.textContent = 'Process: ' + stats.memory + ' MB';
+                if (sysRam) {
+                    ramSystemEl.textContent = 'System: ' + sysRam.usedGB + ' / ' + sysRam.totalGB + ' GB';
+                }
+            }
+
+            // Disk card
+            const diskSizeEl = document.getElementById('console-disk-size');
+            const diskBarEl = document.getElementById('console-disk-bar');
+            const diskFilesEl = document.getElementById('console-disk-files');
+            const diskFoldersEl = document.getElementById('console-disk-folders');
+
+            if (diskSizeEl && stats.disk) {
+                diskSizeEl.textContent = stats.disk.totalGB + ' GB';
+                diskFilesEl.textContent = 'Files: ' + stats.disk.fileCount;
+                if (diskFoldersEl) diskFoldersEl.textContent = 'Folders: ' + stats.disk.dirCount;
+                diskBarEl.style.width = '60%';
+            }
+        }
+
+        function updateUptimeDisplay(uptime) {
+            if (!uptime) { uptimeText.textContent = '--:--:--'; return; }
             const h = Math.floor(uptime / 3600);
             const m = Math.floor((uptime % 3600) / 60);
             const s = uptime % 60;
-            uptimeText.textContent = `${h}h ${m}m ${s}s`;
+            uptimeText.textContent = h + 'h ' + m + 'm ' + s + 's';
         }
 
+        // ================================================================
+        // SERVER CONTROL ACTIONS
+        // ================================================================
         function sendAction(action) {
             socket.emit('action', action);
-            addLog(`» Action: ${action.toUpperCase()}`, 'system');
+            addLog('\u00bb Action: ' + action.toUpperCase(), 'system');
         }
 
         function executeCommand() {
             const cmd = commandInput.value.trim();
             if (cmd) {
                 socket.emit('command', cmd);
-                addLog(`$ ${cmd}`, 'command');
+                addLog('$ ' + cmd, 'command');
                 commandInput.value = '';
             }
         }
 
         function clearConsole() {
-            consoleOutput.innerHTML = '<div class="terminal-line system text-sm">» Console cleared</div>';
+            consoleOutput.innerHTML = '<div class="terminal-line system text-sm">\u00bb Console cleared</div>';
+            consolePreview.innerHTML = '<div class="terminal-line system text-sm">\u00bb Console cleared</div>';
             logCount = 1;
         }
 
+        // ================================================================
+        // INITIAL DATA LOADING
+        // ================================================================
         async function loadNetworkInfo() {
             try {
                 const res = await fetch('/api/network');
                 const data = await res.json();
-                serverIp.textContent = data.ip + ':25565';
-            } catch (err) {
-                serverIp.textContent = '192.168.1.100:25565';
+                serverIpEl.textContent = (data.ip || 'localhost') + ':25565';
+            } catch (e) {
+                serverIpEl.textContent = 'localhost:25565';
             }
         }
 
@@ -544,176 +1789,1281 @@
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                updateStatus(data.running);
+                updateStatusDisplay(data.running);
                 if (data.cpu !== undefined) {
-                    updateMetrics(data.cpu, data.memory || 0);
+                    updateMetricsDisplay(data.cpu, data.memory || 0);
                 }
                 if (data.uptime) {
-                    updateUptime(data.uptime);
+                    updateUptimeDisplay(data.uptime);
                 }
-            } catch (err) {}
+                if (data.disk) {
+                    updateConsoleMetrics({ disk: data.disk, system: null, cpu: data.cpu, memory: data.memory });
+                }
+            } catch (e) {
+                // Silent fail
+            }
         }
 
-        loadNetworkInfo();
-        loadStatus();
-        loadUpdateConfig();
-        
-        setInterval(loadStatus, 3000);
-        
-        // ==================== SECTION NAVIGATION ====================
-        function showView(viewName) {
-            event.preventDefault();
-            
-            document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
-            event.target.closest('.sidebar-item').classList.add('active');
-            
-            const dashboardSection = document.querySelector('.grid.grid-cols-4');
-            const consoleSection = document.getElementById('console-section');
-            const updatesSection = document.getElementById('section-updates');
-            
-            if (viewName === 'dashboard') {
-                dashboardSection.style.display = 'grid';
-                consoleSection.style.display = 'block';
-                updatesSection.classList.remove('active');
-            } else if (viewName === 'console') {
-                dashboardSection.style.display = 'grid';
-                consoleSection.style.display = 'block';
-                updatesSection.classList.remove('active');
-            } else if (viewName === 'updates') {
-                dashboardSection.style.display = 'none';
-                consoleSection.style.display = 'none';
-                updatesSection.classList.add('active');
-                loadUpdateConfig();
-            } else if (viewName === 'files') {
-                dashboardSection.style.display = 'none';
-                consoleSection.style.display = 'none';
-                updatesSection.classList.remove('active');
-            } else if (viewName === 'network') {
-                dashboardSection.style.display = 'none';
-                consoleSection.style.display = 'none';
-                updatesSection.classList.remove('active');
-            }
-        }
-        
-        // ==================== UPDATE FUNCTIONS ====================
-        let updateAvailable = false;
-        
-        async function loadUpdateConfig() {
+        async function loadSettings() {
             try {
-                const res = await fetch('/api/update/config');
+                const res = await fetch('/api/settings');
                 const data = await res.json();
-                
-                const toggle = document.getElementById('auto-update-toggle');
-                if (data.autoUpdateEnabled) {
-                    toggle.classList.add('active');
-                } else {
-                    toggle.classList.remove('active');
+                if (data.success && data.settings) {
+                    document.getElementById('setting-ram').value = data.settings.maxRam || '2G';
+                    document.getElementById('setting-java').value = data.settings.javaPath || 'java';
                 }
-                
-                checkForUpdates();
-            } catch (err) {
-                console.error('Failed to load update config:', err);
+            } catch (e) {
+                // Silent fail
             }
         }
-        
-        async function toggleAutoUpdate() {
-            const toggle = document.getElementById('auto-update-toggle');
-            const isActive = toggle.classList.contains('active');
-            const newState = !isActive;
-            
+
+        // ================================================================
+        // NAVIGATION SYSTEM
+        // ================================================================
+        const NAV_MAP = {
+            dashboard: { section: 'section-dashboard', title: 'Dashboard', nav: 'nav-dashboard' },
+            console: { section: 'section-console', title: 'Console', nav: 'nav-console' },
+            files: { section: 'section-files', title: 'File Explorer', nav: 'nav-files' },
+            marketplace: { section: 'section-marketplace', title: 'Marketplace', nav: 'nav-marketplace' },
+            options: { section: 'section-options', title: 'Server Options', nav: 'nav-options' },
+            network: { section: 'section-network', title: 'Network', nav: 'nav-network' },
+            settings: { section: 'section-settings', title: 'Settings', nav: 'nav-settings' },
+            updates: { section: 'section-updates', title: 'System Updates', nav: 'nav-updates' }
+        };
+
+        function showView(viewName) {
+            if (event) event.preventDefault();
+
+            const pageTitle = document.getElementById('page-title');
+            if (NAV_MAP[viewName]) {
+                pageTitle.textContent = NAV_MAP[viewName].title;
+            }
+
+            document.querySelectorAll('.sidebar-item').forEach(function(item) { item.classList.remove('active'); });
+            if (NAV_MAP[viewName]) {
+                const navEl = document.getElementById(NAV_MAP[viewName].nav);
+                if (navEl) navEl.classList.add('active');
+            }
+
+            Object.values(NAV_MAP).forEach(function(entry) {
+                const el = document.getElementById(entry.section);
+                if (el) el.classList.add('hidden');
+            });
+
+            const target = NAV_MAP[viewName] ? NAV_MAP[viewName].section : null;
+            if (target) {
+                const targetEl = document.getElementById(target);
+                if (targetEl) targetEl.classList.remove('hidden');
+            }
+
+            switch (viewName) {
+                case 'files':
+                    loadFileManager('/api/files/list?path=/', '/');
+                    break;
+                case 'marketplace':
+                    loadInstalledPlugins();
+                    break;
+                case 'options':
+                    loadServerProperties();
+                    break;
+                case 'network':
+                    loadNetworkStatus();
+                    break;
+                case 'settings':
+                    loadSettings();
+                    break;
+                case 'updates':
+                    runUpdateCheck();
+                    break;
+            }
+        }
+
+        // ================================================================
+        // FILE MANAGER LOGIC
+        // ================================================================
+        let currentFmPath = '/';
+        let editorFilePath = null;
+
+        async function loadFileManager(url, basePath) {
+            currentFmPath = basePath;
+            const listEl = document.getElementById('fm-file-list');
+            if (listEl) listEl.innerHTML = '<tr><td colspan="5" class="text-zinc-700 py-16 text-center text-sm">Loading...</td></tr>';
+
             try {
-                const res = await fetch('/api/update/config', {
+                const res = await fetch(url);
+                const data = await res.json();
+
+                if (!data.success) {
+                    if (listEl) listEl.innerHTML = '<tr><td colspan="5" class="text-red-400/80 py-16 text-center text-sm">' + (data.error || 'Failed to load directory') + '</td></tr>';
+                    return;
+                }
+
+                renderFmBreadcrumbs(data.path);
+                renderFmFileList(data.files);
+            } catch (e) {
+                if (listEl) listEl.innerHTML = '<tr><td colspan="5" class="text-red-400/80 py-16 text-center text-sm">Network error loading directory</td></tr>';
+            }
+        }
+
+        function renderFmBreadcrumbs(currentPath) {
+            const el = document.getElementById('fm-breadcrumbs');
+            if (!el) return;
+            const parts = currentPath.split('/').filter(Boolean);
+            let html = '<span class="breadcrumb-item text-zinc-500 hover:text-purple-300 text-xs" onclick="fmNavigateTo(\'/\')">/server</span>';
+            let path = '';
+            for (let i = 0; i < parts.length; i++) {
+                path += '/' + parts[i];
+                html += '<span class="text-zinc-800 mx-0.5">/</span><span class="breadcrumb-item text-zinc-500 hover:text-purple-300 text-xs" onclick="fmNavigateTo(\'' + path + '\')">' + parts[i] + '</span>';
+            }
+            el.innerHTML = html;
+        }
+
+        function renderFmFileList(files) {
+            const listEl = document.getElementById('fm-file-list');
+            if (!listEl) return;
+            if (!files || files.length === 0) {
+                listEl.innerHTML = '<tr><td colspan="5" class="text-zinc-700 py-16 text-center text-sm">This directory is empty</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (let i = 0; i < files.length; i++) {
+                const f = files[i];
+                const size = f.isDirectory ? '\u2014' : formatBytes(f.size);
+                const modTime = f.modified ? new Date(f.modified).toLocaleString() : '\u2014';
+                const icon = f.isDirectory ? 'fa-folder text-yellow-400' : getFileIcon(f.extension);
+                const canEdit = !f.isDirectory && isEditableExt(f.extension);
+                const editBtn = canEdit ? '<button onclick="fmOpenFile(\'' + f.name.replace(/'/g, "\\'") + '\')" class="text-purple-400 hover:text-purple-300 text-xs mx-1" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>' : '';
+                const delBtn = (f.name !== 'server.jar' && f.name !== 'eula.txt') ? '<button onclick="fmDelete(\'' + f.name.replace(/'/g, "\\'") + '\')" class="text-red-500 hover:text-red-400 text-xs mx-1" title="Delete"><i class="fa-solid fa-trash-can"></i></button>' : '';
+                const clickAction = f.isDirectory ? 'fmNavigateInto(\'' + f.name.replace(/'/g, "\\'") + '\')' : 'fmOpenFile(\'' + f.name.replace(/'/g, "\\'") + '\')';
+
+                html += '<tr class="file-row border-b border-zinc-800/20">' +
+                    '<td class="py-2.5 px-5">' +
+                        '<div class="flex items-center gap-3">' +
+                            '<i class="fa-solid ' + icon + ' w-5 text-center text-sm"></i>' +
+                            '<span class="file-name text-zinc-200 ' + (f.isDirectory ? 'font-semibold' : '') + '" onclick="' + clickAction + '">' + f.name + '</span>' +
+                        '</div>' +
+                    '</td>' +
+                    '<td class="py-2.5 px-4 text-zinc-600 text-xs uppercase">' + (f.isDirectory ? 'Folder' : (f.extension.replace('.', '') || 'file')) + '</td>' +
+                    '<td class="py-2.5 px-4 text-zinc-600 text-xs font-mono">' + size + '</td>' +
+                    '<td class="py-2.5 px-4 text-zinc-600 text-xs">' + modTime + '</td>' +
+                    '<td class="py-2.5 px-4">' + editBtn + delBtn + '</td>' +
+                '</tr>';
+            }
+            listEl.innerHTML = html;
+        }
+
+        function fmNavigateInto(name) {
+            const newPath = currentFmPath === '/' ? '/' + name : currentFmPath + '/' + name;
+            fmNavigateTo(newPath);
+        }
+
+        function fmNavigateTo(targetPath) {
+            loadFileManager('/api/files/list?path=' + encodeURIComponent(targetPath), targetPath);
+        }
+
+        function fmOpenFile(name) {
+            const filePath = currentFmPath === '/' ? name : currentFmPath + '/' + name;
+            openFileEditor('/api/files/read?file=' + encodeURIComponent(filePath), filePath);
+        }
+
+        async function openFileEditor(url, filePath) {
+            const modal = document.getElementById('file-editor-modal');
+            const textarea = document.getElementById('file-editor-content');
+            const statusEl = document.getElementById('editor-status');
+
+            editorFilePath = filePath;
+            document.getElementById('editor-file-name').textContent = filePath.split('/').pop();
+            document.getElementById('editor-file-path').textContent = filePath;
+            textarea.value = '';
+            textarea.placeholder = 'Loading...';
+            statusEl.textContent = 'Loading...';
+            modal.classList.remove('hidden');
+
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+
+                if (!data.success) {
+                    statusEl.textContent = 'Error: ' + data.error;
+                    return;
+                }
+
+                textarea.value = data.content;
+                textarea.placeholder = data.isEditable ? 'File content...' : 'This file type cannot be edited';
+                textarea.readOnly = !data.isEditable;
+                editorFilePath = data.path;
+                document.getElementById('editor-file-name').textContent = data.name;
+                document.getElementById('editor-file-path').textContent = data.path;
+                statusEl.textContent = data.isEditable ? 'Editable' : 'Read-only';
+                updateEditorStats();
+            } catch (e) {
+                statusEl.textContent = 'Network error';
+            }
+        }
+
+        function closeFileEditor() {
+            document.getElementById('file-editor-modal').classList.add('hidden');
+            editorFilePath = null;
+        }
+
+        function updateEditorStats() {
+            const content = document.getElementById('file-editor-content').value;
+            document.getElementById('editor-lines').textContent = content.split('\n').length;
+            document.getElementById('editor-chars').textContent = content.length;
+        }
+
+        async function saveFileFromEditor() {
+            if (!editorFilePath) return;
+
+            const content = document.getElementById('file-editor-content').value;
+            const statusEl = document.getElementById('editor-status');
+            statusEl.textContent = 'Saving...';
+
+            try {
+                const res = await fetch('/api/files/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ autoUpdateEnabled: newState })
+                    body: JSON.stringify({ path: editorFilePath, content: content })
                 });
-                
-                if (newState) {
-                    toggle.classList.add('active');
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = 'Saved!';
+                    setTimeout(function() {
+                        statusEl.textContent = 'Editable';
+                        closeFileEditor();
+                        loadFileManager('/api/files/list?path=' + encodeURIComponent(currentFmPath), currentFmPath);
+                    }, 800);
                 } else {
-                    toggle.classList.remove('active');
+                    statusEl.textContent = 'Error: ' + data.error;
                 }
-            } catch (err) {
-                console.error('Failed to toggle auto-update:', err);
+            } catch (e) {
+                statusEl.textContent = 'Network error';
             }
         }
-        
-        async function checkForUpdates() {
+
+        function fmCreateFolder() {
+            document.getElementById('create-modal-title').innerHTML = '<i class="fa-solid fa-folder-plus text-yellow-400 mr-2"></i>New Folder';
+            document.getElementById('create-modal-subtitle').textContent = 'Enter a name for the new folder';
+            document.getElementById('create-label').textContent = 'Folder name';
+            document.getElementById('create-item-name').placeholder = 'my-folder';
+            document.getElementById('create-item-name').dataset.type = 'folder';
+            document.getElementById('create-item-modal').classList.remove('hidden');
+            setTimeout(function() { document.getElementById('create-item-name').focus(); }, 50);
+        }
+
+        function fmCreateFile() {
+            document.getElementById('create-modal-title').innerHTML = '<i class="fa-solid fa-file-circle-plus text-purple-400 mr-2"></i>New File';
+            document.getElementById('create-modal-subtitle').textContent = 'Enter a name for the new file (e.g., config.yml)';
+            document.getElementById('create-label').textContent = 'File name';
+            document.getElementById('create-item-name').placeholder = 'config.yml';
+            document.getElementById('create-item-name').dataset.type = 'file';
+            document.getElementById('create-item-modal').classList.remove('hidden');
+            setTimeout(function() { document.getElementById('create-item-name').focus(); }, 50);
+        }
+
+        function closeCreateModal() {
+            document.getElementById('create-item-modal').classList.add('hidden');
+            document.getElementById('create-item-name').value = '';
+        }
+
+        async function confirmCreateItem() {
+            const name = document.getElementById('create-item-name').value.trim();
+            const type = document.getElementById('create-item-name').dataset.type;
+            if (!name) return;
+
+            try {
+                const res = await fetch('/api/files/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name, type: type, path: currentFmPath })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeCreateModal();
+                    loadFileManager('/api/files/list?path=' + encodeURIComponent(currentFmPath), currentFmPath);
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to create'));
+                }
+            } catch (e) {
+                alert('Network error');
+            }
+        }
+
+        async function fmDelete(name) {
+            if (!confirm('Delete "' + name + '"? This cannot be undone.')) return;
+            const itemPath = currentFmPath === '/' ? name : currentFmPath + '/' + name;
+
+            try {
+                const res = await fetch('/api/files/' + encodeURIComponent(itemPath), { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    loadFileManager('/api/files/list?path=' + encodeURIComponent(currentFmPath), currentFmPath);
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to delete'));
+                }
+            } catch (e) {
+                alert('Network error');
+            }
+        }
+
+        function getFileIcon(ext) {
+            const icons = {
+                '.txt': 'fa-file-lines text-zinc-500',
+                '.yml': 'fa-file-code text-green-400',
+                '.yaml': 'fa-file-code text-green-400',
+                '.properties': 'fa-file-code text-blue-400',
+                '.json': 'fa-file-code text-yellow-400',
+                '.xml': 'fa-file-code text-orange-400',
+                '.log': 'fa-file-contract text-zinc-500',
+                '.jar': 'fa-box text-purple-400',
+                '.sh': 'fa-terminal text-green-400',
+                '.md': 'fa-file-word text-zinc-400'
+            };
+            return icons[ext] || 'fa-file text-zinc-600';
+        }
+
+        function isEditableExt(ext) {
+            return ['.txt', '.yml', '.yaml', '.properties', '.json', '.xml', '.cfg', '.conf', '.log', '.md', '.sh', '.bat', '.toml', '.env'].indexOf(ext) !== -1;
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        document.getElementById('file-editor-content').addEventListener('input', updateEditorStats);
+
+        // ================================================================
+        // SERVER OPTIONS (server.properties) LOGIC
+        // ================================================================
+        async function loadServerProperties() {
+            const statusEl = document.getElementById('props-status');
+            if (statusEl) statusEl.textContent = 'Loading properties...';
+
+            try {
+                const res = await fetch('/api/server/properties');
+                const data = await res.json();
+
+                if (!data.success) {
+                    if (statusEl) statusEl.textContent = 'Failed to load: ' + (data.error || 'unknown');
+                    return;
+                }
+
+                currentProperties = data.properties || {};
+
+                document.getElementById('opt-allow-flight').checked = currentProperties['allow-flight'] === 'true';
+                document.getElementById('opt-online-mode').checked = currentProperties['online-mode'] === 'true';
+                document.getElementById('opt-white-list').checked = currentProperties['white-list'] === 'true';
+                document.getElementById('opt-pvp').checked = currentProperties['pvp'] === 'true';
+                document.getElementById('opt-difficulty').value = currentProperties['difficulty'] || '2';
+                document.getElementById('opt-max-players').value = parseInt(currentProperties['max-players']) || 20;
+                document.getElementById('opt-gamemode').value = currentProperties['gamemode'] || '0';
+                document.getElementById('opt-view-distance').value = currentProperties['view-distance'] || '8';
+                document.getElementById('opt-spawn-protection').value = parseInt(currentProperties['spawn-protection']) || 16;
+                document.getElementById('opt-motd').value = currentProperties['motd'] || 'A Minecraft Server';
+
+                if (statusEl) statusEl.textContent = 'Loaded ' + Object.keys(currentProperties).length + ' properties';
+
+                propsDirty = false;
+                updatePropsDirtyState();
+
+            } catch (e) {
+                if (statusEl) statusEl.textContent = 'Network error loading properties';
+            }
+        }
+
+        function markPropsDirty() {
+            propsDirty = true;
+            updatePropsDirtyState();
+        }
+
+        function updatePropsDirtyState() {
+            const warningEl = document.getElementById('props-restart-warning');
+            if (warningEl) {
+                if (propsDirty) {
+                    warningEl.classList.remove('hidden');
+                } else {
+                    warningEl.classList.add('hidden');
+                }
+            }
+        }
+
+        async function saveServerProperties() {
+            const successEl = document.getElementById('props-save-success');
+            const errorEl = document.getElementById('props-save-error');
+            const errorTextEl = document.getElementById('props-save-error-text');
+            const btn = document.getElementById('btn-apply-props');
+
+            if (successEl) successEl.classList.add('hidden');
+            if (errorEl) errorEl.classList.add('hidden');
+
+            const updatedProps = {
+                'allow-flight': document.getElementById('opt-allow-flight').checked ? 'true' : 'false',
+                'online-mode': document.getElementById('opt-online-mode').checked ? 'true' : 'false',
+                'white-list': document.getElementById('opt-white-list').checked ? 'true' : 'false',
+                'pvp': document.getElementById('opt-pvp').checked ? 'true' : 'false',
+                'difficulty': document.getElementById('opt-difficulty').value,
+                'max-players': document.getElementById('opt-max-players').value,
+                'gamemode': document.getElementById('opt-gamemode').value,
+                'view-distance': document.getElementById('opt-view-distance').value,
+                'spawn-protection': document.getElementById('opt-spawn-protection').value,
+                'motd': document.getElementById('opt-motd').value
+            };
+
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch spinner"></i> Applying...';
+            }
+
+            try {
+                const res = await fetch('/api/server/properties/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ properties: updatedProps })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    propsDirty = false;
+                    updatePropsDirtyState();
+                    if (successEl) successEl.classList.remove('hidden');
+                    setTimeout(function() {
+                        if (successEl) successEl.classList.add('hidden');
+                    }, 3000);
+                } else {
+                    if (errorTextEl) errorTextEl.textContent = data.error || 'Failed to save properties';
+                    if (errorEl) errorEl.classList.remove('hidden');
+                }
+            } catch (e) {
+                if (errorTextEl) errorTextEl.textContent = 'Network error saving properties';
+                if (errorEl) errorEl.classList.remove('hidden');
+            }
+
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-check text-xs"></i> Apply Game Profiles';
+            }
+        }
+
+        function adjustMaxPlayers(delta) {
+            const input = document.getElementById('opt-max-players');
+            const newVal = Math.max(1, Math.min(100, parseInt(input.value) + delta));
+            input.value = newVal;
+            markPropsDirty();
+        }
+
+        // ================================================================
+        // MARKETPLACE LOGIC
+        // ================================================================
+        let mpCurrentQuery = '';
+        let mpCurrentPage = 1;
+
+        async function searchPlugins() {
+            const query = document.getElementById('marketplace-search').value.trim();
+            if (query.length < 2) return;
+
+            mpCurrentQuery = query;
+            mpCurrentPage = 1;
+            await loadPluginResults();
+        }
+
+        async function loadPluginResults() {
+            const grid = document.getElementById('marketplace-grid');
+            const loading = document.getElementById('marketplace-loading');
+            const empty = document.getElementById('marketplace-empty');
+            const noResults = document.getElementById('marketplace-no-results');
+            const error = document.getElementById('marketplace-error');
+            const pagination = document.getElementById('marketplace-pagination');
+
+            [grid, empty, noResults, error, pagination].forEach(function(el) { el.classList.add('hidden'); });
+            loading.classList.remove('hidden');
+
+            try {
+                const res = await fetch('/api/plugins/search?q=' + encodeURIComponent(mpCurrentQuery) + '&page=' + mpCurrentPage);
+                const data = await res.json();
+                loading.classList.add('hidden');
+
+                if (!data.success || !data.plugins || data.plugins.length === 0) {
+                    document.getElementById('search-query-display').textContent = mpCurrentQuery;
+                    noResults.classList.remove('hidden');
+                    return;
+                }
+
+                renderPluginCards(data.plugins);
+                grid.classList.remove('hidden');
+                pagination.classList.remove('hidden');
+
+                document.getElementById('mp-page-info').textContent = 'Page ' + mpCurrentPage;
+                document.getElementById('mp-btn-prev').disabled = mpCurrentPage <= 1;
+                document.getElementById('mp-btn-next').disabled = data.plugins.length < data.perPage;
+            } catch (e) {
+                loading.classList.add('hidden');
+                error.classList.remove('hidden');
+            }
+        }
+
+        function renderPluginCards(plugins) {
+            const grid = document.getElementById('marketplace-grid');
+            let html = '';
+            for (let i = 0; i < plugins.length; i++) {
+                const p = plugins[i];
+                const iconHtml = p.icon
+                    ? '<img src="' + p.icon + '" class="w-12 h-12 rounded-xl object-cover" alt="' + p.name + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
+                      '<div class="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-600/20 to-magenta-500/20 items-center justify-center hidden"><i class="fa-solid fa-puzzle-piece text-purple-400 text-xl"></i></div>'
+                    : '<div class="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-600/20 to-magenta-500/20 flex items-center justify-center"><i class="fa-solid fa-puzzle-piece text-purple-400 text-xl"></i></div>';
+
+                const badge = p.source === 'modrinth'
+                    ? '<span class="absolute top-2 left-2 text-xs bg-blue-600/80 text-blue-200 px-2 py-0.5 rounded-lg">Modrinth</span>'
+                    : '<span class="absolute top-2 left-2 text-xs bg-amber-600/80 text-amber-200 px-2 py-0.5 rounded-lg">Spigot</span>';
+
+                const priceTag = p.premium
+                    ? '<span class="text-amber-400 text-xs font-semibold"><i class="fa-solid fa-coins mr-1"></i>$' + p.price + '</span>'
+                    : '<span class="text-emerald-400 text-xs font-semibold">Free</span>';
+
+                const installBtnId = 'install-btn-' + p.id;
+                const installIconId = 'install-icon-' + p.id;
+                const installTextId = 'install-text-' + p.id;
+
+                html += '<div class="plugin-card glass-card rounded-2xl p-5 relative" data-id="' + p.id + '">' +
+                    '<div class="flex gap-3 mb-3">' +
+                        '<div class="relative flex-shrink-0 flex">' + iconHtml + badge + '</div>' +
+                        '<div class="flex-1 min-w-0">' +
+                            '<h4 class="text-sm font-bold text-white truncate leading-tight">' + p.name + '</h4>' +
+                            '<p class="text-xs text-zinc-500 mt-0.5">by ' + p.author + '</p>' +
+                        '</div>' +
+                    '</div>' +
+                    '<p class="text-xs text-zinc-400 leading-relaxed mb-3 line-clamp-3">' + (p.description || 'No description available.') + '</p>' +
+                    '<div class="flex items-center gap-3 text-xs text-zinc-500 mb-3">' +
+                        '<span><i class="fa-solid fa-download text-zinc-700 mr-1"></i>' + formatNumber(p.downloads) + '</span>' +
+                        priceTag +
+                        '<span class="ml-auto text-zinc-700 font-mono">v' + p.version + '</span>' +
+                    '</div>' +
+                    '<button onclick="installPlugin(\'' + p.id + '\', \'' + p.source + '\', \'' + p.name.replace(/'/g, "\\'") + '\')" ' +
+                            'id="' + installBtnId + '" ' +
+                            'class="install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2">' +
+                        '<i class="fa-solid fa-download" id="' + installIconId + '"></i>' +
+                        '<span id="' + installTextId + '">Install</span>' +
+                    '</button>' +
+                '</div>';
+            }
+            grid.innerHTML = html;
+        }
+
+        async function installPlugin(id, source, name) {
+            if (isOnline) {
+                alert('Stop the server before installing plugins!');
+                return;
+            }
+
+            const btn = document.getElementById('install-btn-' + id);
+            const icon = document.getElementById('install-icon-' + id);
+            const text = document.getElementById('install-text-' + id);
+
+            btn.disabled = true;
+            icon.className = 'fa-solid fa-circle-notch spinner';
+            text.textContent = 'Installing...';
+
+            try {
+                const res = await fetch('/api/plugins/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resourceId: id, source: source, name: name })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    icon.className = 'fa-solid fa-check';
+                    text.textContent = 'Installed!';
+                    btn.className = 'install-btn w-full py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                    setTimeout(function() {
+                        icon.className = 'fa-solid fa-download';
+                        text.textContent = 'Install';
+                        btn.className = 'install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                        btn.disabled = false;
+                        loadInstalledPlugins();
+                    }, 2000);
+                } else {
+                    icon.className = 'fa-solid fa-triangle-exclamation';
+                    text.textContent = data.error || 'Failed';
+                    btn.className = 'install-btn w-full py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                    setTimeout(function() {
+                        icon.className = 'fa-solid fa-download';
+                        text.textContent = 'Retry';
+                        btn.className = 'install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                        btn.disabled = false;
+                    }, 3000);
+                }
+            } catch (e) {
+                icon.className = 'fa-solid fa-triangle-exclamation';
+                text.textContent = 'Error';
+                btn.className = 'install-btn w-full py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                setTimeout(function() {
+                    icon.className = 'fa-solid fa-download';
+                    text.textContent = 'Retry';
+                    btn.className = 'install-btn w-full py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2';
+                    btn.disabled = false;
+                }, 3000);
+            }
+        }
+
+        async function loadInstalledPlugins() {
+            const list = document.getElementById('installed-plugins-list');
+            try {
+                const res = await fetch('/api/plugins/installed');
+                const data = await res.json();
+
+                if (!data.success || !data.plugins || data.plugins.length === 0) {
+                    list.innerHTML = '<div class="text-zinc-700 text-sm py-4 text-center">No plugins installed yet</div>';
+                    return;
+                }
+
+                let html = '';
+                for (let i = 0; i < data.plugins.length; i++) {
+                    const p = data.plugins[i];
+                    html += '<div class="flex items-center justify-between p-3 bg-zinc-900/40 rounded-xl border border-zinc-800/30">' +
+                        '<div class="flex items-center gap-3">' +
+                            '<i class="fa-solid fa-puzzle-piece text-purple-400 text-sm"></i>' +
+                            '<div>' +
+                                '<div class="text-sm text-zinc-200 font-medium">' + p.name + '</div>' +
+                                '<div class="text-xs text-zinc-600">' + formatBytes(p.size) + '</div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<button onclick="deleteInstalledPlugin(\'' + p.name.replace(/'/g, "\\'") + '\')" class="text-red-500 hover:text-red-400 text-xs px-2 py-1 rounded-lg hover:bg-red-500/10 transition">' +
+                            '<i class="fa-solid fa-trash-can mr-1"></i>Remove' +
+                        '</button>' +
+                    '</div>';
+                }
+                list.innerHTML = html;
+            } catch (e) {
+                list.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">Failed to load plugins</div>';
+            }
+        }
+
+        async function deleteInstalledPlugin(name) {
+            if (!confirm('Delete plugin "' + name + '"?')) return;
+            try {
+                const res = await fetch('/api/plugins/' + encodeURIComponent(name), { method: 'DELETE' });
+                if (res.ok) loadInstalledPlugins();
+                else alert('Failed to delete plugin');
+            } catch (e) {
+                alert('Network error');
+            }
+        }
+
+        function prevPluginPage() {
+            if (mpCurrentPage <= 1) return;
+            mpCurrentPage--;
+            loadPluginResults();
+        }
+
+        function nextPluginPage() {
+            mpCurrentPage++;
+            loadPluginResults();
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        // ================================================================
+        // NETWORK & PORT MANAGER LOGIC
+        // ================================================================
+        async function loadNetworkStatus() {
+            const refreshIcon = document.getElementById('network-refresh-icon');
+            if (refreshIcon) refreshIcon.classList.add('spinner');
+
+            try {
+                const res = await fetch('/api/network/status');
+                const data = await res.json();
+
+                document.getElementById('net-public-ip').textContent = data.publicIP || '\u2014';
+                document.getElementById('net-local-ip').textContent = data.localIP || '\u2014';
+                document.getElementById('net-hostname').textContent = data.hostname || '\u2014';
+
+                const portsTable = document.getElementById('default-ports-table');
+                if (data.defaultPorts && data.defaultPorts.length > 0) {
+                    let html = '';
+                    for (let i = 0; i < data.defaultPorts.length; i++) {
+                        const p = data.defaultPorts[i];
+                        html += '<tr class="border-b border-zinc-800/20">' +
+                            '<td class="py-2.5 px-4 font-mono font-bold text-white">' + p.port + '</td>' +
+                            '<td class="py-2.5 px-4 text-zinc-300">' + p.service + '</td>' +
+                            '<td class="py-2.5 px-4"><span class="port-badge ' + (p.status === 'free' ? 'open' : 'in-use') + '">' + (p.status === 'free' ? 'OPEN' : 'IN USE') + '</span></td>' +
+                        '</tr>';
+                    }
+                    portsTable.innerHTML = html;
+                } else {
+                    portsTable.innerHTML = '<tr><td colspan="3" class="text-zinc-700 py-10 text-center">No port data available</td></tr>';
+                }
+
+                const allocTable = document.getElementById('allocations-table');
+                if (data.allocations && data.allocations.length > 0) {
+                    let html = '';
+                    for (let i = 0; i < data.allocations.length; i++) {
+                        const a = data.allocations[i];
+                        const date = new Date(a.allocatedAt).toLocaleString();
+                        html += '<tr class="border-b border-zinc-800/20">' +
+                            '<td class="py-2.5 px-4 font-mono font-bold text-white">' + a.port + '</td>' +
+                            '<td class="py-2.5 px-4 text-zinc-300">' + a.service + '</td>' +
+                            '<td class="py-2.5 px-4 text-zinc-500 text-xs">' + (a.description || '\u2014') + '</td>' +
+                            '<td class="py-2.5 px-4 text-zinc-600 text-xs">' + date + '</td>' +
+                            '<td class="py-2.5 px-4"><button onclick="deallocatePort(' + a.port + ')" class="text-red-500 hover:text-red-400 text-xs px-2 py-1 rounded-lg hover:bg-red-500/10 transition"><i class="fa-solid fa-trash-can mr-1"></i>Release</button></td>' +
+                        '</tr>';
+                    }
+                    allocTable.innerHTML = html;
+                } else {
+                    allocTable.innerHTML = '<tr><td colspan="5" class="text-zinc-700 py-8 text-center">No active allocations</td></tr>';
+                }
+            } catch (err) {
+                console.error('Network status load error:', err);
+            }
+
+            if (refreshIcon) refreshIcon.classList.remove('spinner');
+        }
+
+        function refreshNetworkStatus() {
+            loadNetworkStatus();
+        }
+
+        async function allocatePort() {
+            const port = parseInt(document.getElementById('new-port').value, 10);
+            const service = document.getElementById('new-service').value.trim();
+            const description = document.getElementById('new-description').value.trim();
+            const errorEl = document.getElementById('allocate-error');
+            const successEl = document.getElementById('allocate-success');
+
+            errorEl.classList.add('hidden');
+            successEl.classList.add('hidden');
+
+            if (!port || port < 1 || port > 65535) {
+                errorEl.textContent = 'Enter a valid port between 1 and 65535';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/network/allocate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ port: port, service: service, description: description })
+                });
+                const data = await res.json();
+
+                if (res.ok && data.success) {
+                    successEl.textContent = 'Port ' + port + ' allocated successfully!';
+                    successEl.classList.remove('hidden');
+                    document.getElementById('new-port').value = '';
+                    document.getElementById('new-service').value = '';
+                    document.getElementById('new-description').value = '';
+                    loadNetworkStatus();
+                } else {
+                    errorEl.textContent = data.error || 'Failed to allocate port. Port may be in use.';
+                    errorEl.classList.remove('hidden');
+                }
+            } catch (e) {
+                errorEl.textContent = 'Network error. Please try again.';
+                errorEl.classList.remove('hidden');
+            }
+        }
+
+        async function deallocatePort(port) {
+            if (!confirm('Release port ' + port + '? This will remove the allocation.')) return;
+            try {
+                const res = await fetch('/api/network/allocate/' + port, { method: 'DELETE' });
+                if (res.ok) loadNetworkStatus();
+                else alert('Failed to release port');
+            } catch (e) {
+                alert('Network error');
+            }
+        }
+
+        // ================================================================
+        // SETTINGS LOGIC
+        // ================================================================
+        async function saveSettings() {
+            const maxRam = document.getElementById('setting-ram').value;
+            const javaPath = document.getElementById('setting-java').value;
+            const successEl = document.getElementById('settings-success');
+
+            try {
+                const res = await fetch('/api/settings/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ maxRam: maxRam, javaPath: javaPath })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    successEl.classList.remove('hidden');
+                    setTimeout(function() { successEl.classList.add('hidden'); }, 3000);
+                } else {
+                    alert('Failed to save settings: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Network error saving settings');
+            }
+        }
+
+        // ================================================================
+        // SYSTEM UPDATES LOGIC — ADVANCED STREAMING DEPLOYMENT
+        // ================================================================
+        let updateDownloadUrl = null;
+        let updatePollInterval = null;
+        let updateTerminalLines = [];
+        const MAX_TERMINAL_LINES = 200;
+
+        // Socket event listener: receive live progress lines from the
+        // backend bash subprocess and display them in the streaming terminal.
+        socket.on('update-progress', function(progressData) {
+            appendUpdateTerminalLine(progressData.text, progressData.level, progressData.timestamp);
+            updateProgressStepFromLine(progressData.text);
+        });
+
+        // Socket event listener: triggered when the backend bash script
+        // has fully exited. At this point PM2 has been instructed to restart.
+        socket.on('update-complete', function(result) {
+            clearInterval(updatePollInterval);
+            updatePollInterval = null;
+
+            if (result.success) {
+                showUpdateComplete(result.message);
+                startUpdateHealthPoll();
+            } else {
+                showUpdateFailed(result.message);
+            }
+        });
+
+        /**
+         * appendUpdateTerminalLine — appends a single line to the live
+         * streaming deployment terminal inside the glassmorphic UI.
+         * Each line is color-coded by its severity level and auto-scrolls
+         * to the bottom so the user always sees the latest output.
+         *
+         * @param {string} text      - The line text to display.
+         * @param {string} level     - 'system' | 'info' | 'warn' | 'error' | 'success'.
+         * @param {string} timestamp - ISO timestamp from the server (unused for now
+         *                            but available if we add per-line timestamps later).
+         */
+        function appendUpdateTerminalLine(text, level, timestamp) {
+            const terminalLines = document.getElementById('update-terminal-lines');
+            if (!terminalLines) return;
+
+            // Build the CSS class based on the line severity level.
+            let colorClass = 'text-zinc-300'; // default
+            let prefix = '';
+            if (level === 'error') {
+                colorClass = 'text-red-400';
+                prefix = '\u2715 ';
+            } else if (level === 'warn') {
+                colorClass = 'text-amber-400';
+                prefix = '\u26A0 ';
+            } else if (level === 'success') {
+                colorClass = 'text-emerald-400';
+                prefix = '\u2713 ';
+            } else if (level === 'system') {
+                colorClass = 'text-purple-400';
+            } else {
+                colorClass = 'text-zinc-400';
+            }
+
+            const line = document.createElement('div');
+            line.className = colorClass + ' text-xs leading-relaxed';
+            line.textContent = (prefix || '') + text;
+
+            terminalLines.appendChild(line);
+            updateTerminalLines.push({ text: text, level: level });
+
+            // Enforce the rolling line limit so the terminal does not
+            // consume excessive memory on long-running deployments.
+            while (updateTerminalLines.length > MAX_TERMINAL_LINES) {
+                updateTerminalLines.shift();
+                if (terminalLines.firstChild) {
+                    terminalLines.removeChild(terminalLines.firstChild);
+                }
+            }
+
+            // Auto-scroll the terminal output area to the bottom.
+            const container = document.getElementById('update-terminal-output');
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        /**
+         * updateProgressStepFromLine — parses a raw bash script milestone
+         * line (e.g. "[STEP 1] Preparing workspace...") and advances the
+         * 7-step progress indicator at the top of the deployment UI.
+         * This gives the user a visual sense of how far the deployment
+         * has progressed without requiring explicit step events.
+         *
+         * @param {string} line - The raw bash output line.
+         */
+        function updateProgressStepFromLine(line) {
+            const stepMatch = line.match(/\[STEP\s+(\d+)\]/i);
+            if (stepMatch) {
+                const stepNum = parseInt(stepMatch[1], 10);
+                activateStepIndicator(stepNum);
+            }
+
+            // Update the main progress bar percentage and label.
+            const progressContainer = document.getElementById('update-progress-container');
+            const progressBar = document.getElementById('deploy-progress-bar');
+            const percentText = document.getElementById('deploy-percent-text');
+            const phaseLabel = document.getElementById('deploy-phase-label');
+
+            if (progressContainer && progressBar && percentText && phaseLabel) {
+                // Map step numbers to rough progress percentages so the bar
+                // feels like it is moving forward during the deployment.
+                const stepPercents = {
+                    0: 0, 1: 5, 2: 20, 3: 35, 4: 50, 5: 70, 6: 85, 7: 100
+                };
+                const step = stepMatch ? parseInt(stepMatch[1]) : 0;
+                const pct = stepPercents[step] || 0;
+
+                progressBar.style.width = pct + '%';
+                percentText.textContent = pct + '%';
+
+                const phaseLabels = {
+                    0: 'Initializing deployment...',
+                    1: 'Preparing isolated workspace...',
+                    2: 'Extracting and resolving archive...',
+                    3: 'Creating pre-update backup...',
+                    4: 'Installing production dependencies...',
+                    5: 'Executing atomic overwrite...',
+                    6: 'Verifying installation and restarting PM2...',
+                    7: 'Deployment complete!'
+                };
+                phaseLabel.textContent = phaseLabels[step] || 'Processing...';
+            }
+        }
+
+        /**
+         * activateStepIndicator — lights up the step progress indicator
+         * dots at the top of the deployment UI one by one as the bash
+         * script progresses through its steps.
+         *
+         * @param {number} step - The current step number (1-7).
+         */
+        function activateStepIndicator(step) {
+            for (let i = 1; i <= 7; i++) {
+                const el = document.getElementById('step-indicator-' + i);
+                if (!el) continue;
+                if (i <= step) {
+                    el.classList.add('step-glow');
+                }
+            }
+
+            const stepLabel = document.getElementById('step-label');
+            if (stepLabel) {
+                const labels = {
+                    1: 'Workspace',
+                    2: 'Archive',
+                    3: 'Backup',
+                    4: 'Dependencies',
+                    5: 'Overwrite',
+                    6: 'Restart',
+                    7: 'Complete'
+                };
+                stepLabel.textContent = 'Step ' + step + '/7: ' + (labels[step] || 'Running');
+            }
+        }
+
+        /**
+         * showUpdateUI — transitions the update section from the idle
+         * state into the live streaming deployment mode. Hides all idle
+         * elements, reveals the terminal UI, step indicators, and progress
+         * bar. Called when the user clicks Install Update.
+         */
+        function showUpdateUI() {
+            document.getElementById('update-status-alert').classList.add('hidden');
+            document.getElementById('btn-check-update').disabled = true;
+            document.getElementById('btn-install-update').disabled = true;
+
+            document.getElementById('update-step-indicator').classList.remove('hidden');
+            document.getElementById('update-terminal-container').classList.remove('hidden');
+            document.getElementById('update-progress-container').classList.remove('hidden');
+
+            document.getElementById('update-complete-container').classList.add('hidden');
+            document.getElementById('update-failed-container').classList.add('hidden');
+
+            const terminalLines = document.getElementById('update-terminal-lines');
+            if (terminalLines) terminalLines.innerHTML = '';
+            updateTerminalLines = [];
+
+            const logEl = document.getElementById('deployment-log');
+            if (logEl) {
+                logEl.innerHTML = '<div class="text-zinc-800">Streaming deployment output...</div>';
+            }
+
+            activateStepIndicator(0);
+        }
+
+        /**
+         * showUpdateComplete — called when the backend emits update-complete
+         * with success: true. Shows the success overlay and starts the
+         * auto-reload countdown. The panel is restarting in the background.
+         *
+         * @param {string} message - The success message from the backend.
+         */
+        function showUpdateComplete(message) {
+            document.getElementById('update-complete-container').classList.remove('hidden');
+            document.getElementById('update-complete-message').textContent = message || 'Panel is restarting. Refreshing automatically...';
+
+            document.getElementById('deploy-spinner').classList.add('hidden');
+            document.getElementById('deploy-progress-bar').style.width = '100%';
+            document.getElementById('deploy-progress-bar').className = 'h-full rounded-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-500';
+            document.getElementById('deploy-percent-text').textContent = '100%';
+            document.getElementById('deploy-phase-label').textContent = 'Deployment completed successfully!';
+
+            appendDeploymentLog('[SUCCESS] ' + (message || 'Deployment completed successfully.'));
+        }
+
+        /**
+         * showUpdateFailed — called when the backend emits update-complete
+         * with success: false. Shows the failure overlay. The ERR trap in
+         * update.sh will have already rolled the panel back to the previous
+         * working state and restarted PM2, so the panel is still functional.
+         *
+         * @param {string} message - The failure message from the backend.
+         */
+        function showUpdateFailed(message) {
+            document.getElementById('update-failed-container').classList.remove('hidden');
+            document.getElementById('update-failed-message').textContent = message || 'Deployment failed. The panel has been automatically rolled back to the previous working version.';
+
+            document.getElementById('deploy-spinner').classList.add('hidden');
+            document.getElementById('deploy-phase-label').textContent = 'Deployment failed \u2014 rolled back';
+            document.getElementById('deploy-percent-text').textContent = 'FAILED';
+
+            appendDeploymentLog('[ERROR] ' + (message || 'Deployment failed. Previous version is online.'));
+        }
+
+        /**
+         * resetUpdateUI — restores the update section to its idle state
+         * after a deployment has completed or failed. Called when the user
+         * clicks the "Back to Update Manager" button on the failed overlay.
+         */
+        function resetUpdateUI() {
+            document.getElementById('update-step-indicator').classList.add('hidden');
+            document.getElementById('update-terminal-container').classList.add('hidden');
+            document.getElementById('update-progress-container').classList.add('hidden');
+            document.getElementById('update-complete-container').classList.add('hidden');
+            document.getElementById('update-failed-container').classList.add('hidden');
+            document.getElementById('update-status-alert').classList.remove('hidden');
+
+            document.getElementById('btn-check-update').disabled = false;
+
+            for (let i = 1; i <= 7; i++) {
+                const el = document.getElementById('step-indicator-' + i);
+                if (el) el.classList.remove('step-glow');
+            }
+
+            const progressBar = document.getElementById('deploy-progress-bar');
+            if (progressBar) progressBar.style.width = '0%';
+
+            const terminalLines = document.getElementById('update-terminal-lines');
+            if (terminalLines) terminalLines.innerHTML = '';
+            updateTerminalLines = [];
+        }
+
+        /**
+         * startUpdateHealthPoll — starts a 1.5-second interval that pings
+         * the panel's /api/update/check endpoint to detect when it has come
+         * back online after PM2 restarts. Once a successful response is
+         * received, the browser auto-reloads to load the new version.
+         */
+        function startUpdateHealthPoll() {
+            let pollCount = 0;
+            const MAX_POLLS = 40;
+
+            if (updatePollInterval) clearInterval(updatePollInterval);
+
+            updatePollInterval = setInterval(async function() {
+                pollCount++;
+
+                const timeText = document.getElementById('update-reload-countdown');
+                const remaining = Math.max(0, 4 - Math.floor(pollCount / 3));
+                if (timeText) {
+                    timeText.textContent = 'Reloading in ' + remaining + 's...';
+                }
+
+                try {
+                    const res = await fetch('/api/update/check', { cache: 'no-store' });
+                    if (res.ok) {
+                        clearInterval(updatePollInterval);
+                        updatePollInterval = null;
+                        setTimeout(function() { location.reload(); }, 1500);
+                    }
+                } catch (e) {
+                    // Not yet online — keep polling.
+                }
+
+                if (pollCount >= MAX_POLLS) {
+                    clearInterval(updatePollInterval);
+                    updatePollInterval = null;
+                    setTimeout(function() { location.reload(); }, 2000);
+                }
+            }, 1500);
+        }
+
+        /**
+         * appendDeploymentLog — appends a timestamped entry to the historical
+         * deployment log panel at the bottom of the update section. This
+         * provides a persistent record separate from the live terminal.
+         */
+        function appendDeploymentLog(message) {
+            const logEl = document.getElementById('deployment-log');
+            if (!logEl) return;
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'text-zinc-600';
+            entry.textContent = '[' + timestamp + '] ' + message;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        // ================================================================
+        // UPDATE CHECK & INITIATION
+        // ================================================================
+
+        async function runUpdateCheck() {
             const btn = document.getElementById('btn-check-update');
             const icon = document.getElementById('check-icon');
             const spinner = document.getElementById('check-spinner');
-            const badge = document.getElementById('update-badge');
-            
+
             icon.classList.add('hidden');
             spinner.classList.remove('hidden');
             btn.disabled = true;
-            
+
             try {
                 const res = await fetch('/api/update/check');
                 const data = await res.json();
-                
-                document.getElementById('current-commit').textContent = data.currentCommit || 'unknown';
-                document.getElementById('latest-commit').textContent = data.latestCommit || 'unknown';
-                
-                if (data.updateAvailable) {
-                    badge.className = 'update-badge available';
-                    badge.textContent = 'UPDATE AVAILABLE';
-                    updateAvailable = true;
-                    
-                    document.getElementById('btn-install-update').disabled = false;
-                    document.getElementById('btn-install-update').classList.remove('opacity-50', 'cursor-not-allowed');
+
+                document.getElementById('update-current-version').textContent = 'v' + (data.currentVersion || 'unknown');
+                document.getElementById('update-latest-version').textContent = 'v' + (data.latestVersion || 'unknown');
+                updateDownloadUrl = data.downloadUrl || null;
+
+                const alertEl = document.getElementById('update-status-alert');
+                const alertBox = document.getElementById('update-alert-box');
+                const alertIcon = document.getElementById('update-alert-icon');
+                const alertTitle = document.getElementById('update-alert-title');
+                const alertDesc = document.getElementById('update-alert-desc');
+                const installBtn = document.getElementById('btn-install-update');
+
+                alertEl.classList.remove('hidden');
+
+                if (data.updateAvailable && updateDownloadUrl) {
+                    alertBox.className = 'flex items-start gap-3 p-4 rounded-xl border bg-purple-900/10 border-purple-500/30';
+                    alertIcon.className = 'fa-solid fa-arrow-up text-lg text-purple-400';
+                    alertTitle.textContent = 'Update Available \u2014 v' + data.latestVersion;
+                    alertTitle.className = 'text-sm font-bold text-purple-300 mb-1';
+                    alertDesc.textContent = 'A new release is ready. Click Install Update to deploy it. The panel will restart briefly.';
+                    alertDesc.className = 'text-xs text-purple-300/70';
+
+                    document.getElementById('update-badge-container').innerHTML = '<span class="tab-badge update-available animate-pulse-slow">UPDATE AVAILABLE</span>';
+                    installBtn.disabled = false;
+                    installBtn.classList.remove('disabled:opacity-25', 'disabled:cursor-not-allowed');
+
+                    appendDeploymentLog('Update detected: v' + data.currentVersion + ' \u2192 v' + data.latestVersion);
                 } else {
-                    badge.className = 'update-badge uptodate';
-                    badge.textContent = 'UP TO DATE';
-                    updateAvailable = false;
-                    
-                    document.getElementById('btn-install-update').disabled = true;
-                    document.getElementById('btn-install-update').classList.add('opacity-50', 'cursor-not-allowed');
+                    alertBox.className = 'flex items-start gap-3 p-4 rounded-xl border bg-emerald-900/10 border-emerald-500/30';
+                    alertIcon.className = 'fa-solid fa-check-circle text-lg text-emerald-400';
+                    alertTitle.textContent = 'System Up to Date';
+                    alertTitle.className = 'text-sm font-bold text-emerald-300 mb-1';
+                    alertDesc.textContent = 'You are running the latest version: v' + (data.currentVersion || 'unknown');
+                    alertDesc.className = 'text-xs text-emerald-300/70';
+
+                    document.getElementById('update-badge-container').innerHTML = '<span class="tab-badge uptodate">UP TO DATE</span>';
+                    installBtn.disabled = true;
+                    installBtn.classList.add('disabled:opacity-25', 'disabled:cursor-not-allowed');
+
+                    appendDeploymentLog('System is up to date at v' + (data.currentVersion || 'unknown'));
                 }
             } catch (err) {
-                badge.className = 'update-badge uptodate';
-                badge.textContent = 'CHECK FAILED';
                 console.error('Update check failed:', err);
+                appendDeploymentLog('Update check failed \u2014 network error');
+
+                const alertEl = document.getElementById('update-status-alert');
+                const alertBox = document.getElementById('update-alert-box');
+                const alertIcon = document.getElementById('update-alert-icon');
+                const alertTitle = document.getElementById('update-alert-title');
+                const alertDesc = document.getElementById('update-alert-desc');
+
+                alertEl.classList.remove('hidden');
+                alertBox.className = 'flex items-start gap-3 p-4 rounded-xl border bg-red-900/10 border-red-500/30';
+                alertIcon.className = 'fa-solid fa-triangle-exclamation text-lg text-red-400';
+                alertTitle.textContent = 'Update Check Failed';
+                alertTitle.className = 'text-sm font-bold text-red-300 mb-1';
+                alertDesc.textContent = 'Could not reach GitHub API. Check your network connection and try again.';
+                alertDesc.className = 'text-xs text-red-300/70';
             }
-            
+
             icon.classList.remove('hidden');
             spinner.classList.add('hidden');
             btn.disabled = false;
         }
-        
-        function installUpdate() {
-            if (!updateAvailable) return;
-            document.getElementById('update-modal').classList.remove('hidden');
-        }
-        
-        function closeUpdateModal() {
-            document.getElementById('update-modal').classList.add('hidden');
-        }
-        
-        async function confirmUpdate() {
-            closeUpdateModal();
-            
+
+        /**
+         * initiateUpdate — the main deployment trigger. Called when the user
+         * clicks the "Install System Update" button. Transitions the UI into
+         * deployment mode, sends the POST to the backend, and then the Socket.io
+         * event handlers (update-progress and update-complete) take over.
+         */
+        async function initiateUpdate() {
+            if (!updateDownloadUrl) return;
+
             const btn = document.getElementById('btn-install-update');
             btn.disabled = true;
-            btn.innerHTML = '<i class="fa-solid fa-circle-notch spinner mr-1"></i> Installing...';
-            
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch spinner"></i> Deploying...';
+
+            // Transition the UI to the live deployment streaming mode.
+            showUpdateUI();
+
+            appendDeploymentLog('Deployment sequence initiated...');
+            appendUpdateTerminalLine('[SYSTEM] Deployment sequence initiated.', 'system');
+
             try {
-                const res = await fetch('/api/update/apply', { method: 'POST' });
+                const res = await fetch('/api/update/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ downloadUrl: updateDownloadUrl })
+                });
                 const data = await res.json();
-                
-                if (data.success) {
-                    alert('Update installed! The panel will restart.');
+
+                if (res.ok && data.success) {
+                    appendUpdateTerminalLine('[SYSTEM] Deployment script started. Streaming output...', 'system');
+                    appendDeploymentLog('Deployment signal acknowledged \u2014 monitoring progress.');
                 } else {
-                    alert('Update failed: ' + (data.error || 'Unknown error'));
-                    btn.innerHTML = '<i class="fa-solid fa-download mr-1"></i> Install Update';
-                    btn.disabled = false;
+                    throw new Error(data.error || 'Server rejected installation request');
                 }
             } catch (err) {
-                alert('Update request failed: ' + err.message);
-                btn.innerHTML = '<i class="fa-solid fa-download mr-1"></i> Install Update';
-                btn.disabled = false;
+                console.error('Deployment initiation failed:', err);
+                appendUpdateTerminalLine('[ERROR] Failed to initiate deployment: ' + err.message, 'error');
+                appendDeploymentLog('Deployment initiation failed: ' + err.message);
+                showUpdateFailed('Failed to start deployment: ' + err.message);
             }
         }
+
+        function clearDeploymentLog() {
+            const logEl = document.getElementById('deployment-log');
+            if (logEl) logEl.innerHTML = '<div class="text-zinc-800">Deployment log cleared...</div>';
+        }
+
+        // ================================================================
+        // WINDOW INITIALIZATION
+        // ================================================================
+        window.addEventListener('load', function() {
+            loadNetworkInfo();
+            loadStatus();
+            showView('dashboard');
+            setInterval(loadStatus, 3000);
+        });
     </script>
 </body>
 </html>
