@@ -13,92 +13,195 @@
             theme: {
                 extend: {
                     colors: {
-                        zinc: { 850: '#1f1f22', 900: '#18181b', 950: '#09090b' },
-                        purple: { 500: '#9d4edd', 600: '#7c3aed', 400: '#b5179e', DEFAULT: '#7c3aed' }
+                        zinc: { 750: '#2a2a30', 800: '#1e1e24', 850: '#16161c', 900: '#0e0e14', 950: '#06060a' },
+                        cyber: { 500: '#00f0ff', 400: '#33f5ff', 300: '#66f8ff', DEFAULT: '#00f0ff' },
+                        neon: { green: '#00ff41', cyan: '#00f0ff', magenta: '#ff00ff', purple: '#bf00ff' }
                     },
                     fontFamily: {
-                        sans: ['Inter', 'system-ui', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+                        mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
+                        sans: ['JetBrains Mono', 'system-ui', 'sans-serif']
                     },
                     animation: {
                         'fade-in': 'fadeIn 0.3s ease-out',
                         'slide-up': 'slideUp 0.3s ease-out',
-                        'glow-pulse': 'glowPulse 2s ease-in-out infinite alternate',
-                        'pulse-slow': 'pulseSlow 3s ease-in-out infinite'
+                        'glitch': 'glitch 3s ease-in-out infinite',
+                        'scan': 'scanMove 10s linear infinite',
+                        'matrix-fall': 'matrixFall 1.5s linear infinite',
+                        'pulse-glow': 'pulseGlow 2s ease-in-out infinite alternate'
                     },
                     keyframes: {
                         fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
                         slideUp: { '0%': { opacity: '0', transform: 'translateY(12px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
-                        glowPulse: { '0%': { boxShadow: '0 0 8px rgba(157, 78, 221, 0.3)' }, '100%': { boxShadow: '0 0 25px rgba(157, 78, 221, 0.6)' } },
-                        pulseSlow: { '0%, 100%': { opacity: '1' }, '50%': { opacity: '0.6' } }
+                        pulseGlow: { '0%': { boxShadow: '0 0 5px rgba(0, 240, 255, 0.2)' }, '100%': { boxShadow: '0 0 25px rgba(0, 240, 255, 0.5)' } }
                     }
                 }
             }
         }
     </script>
     <style>
-        * { scrollbar-width: thin; scrollbar-color: #3f3f46 #18181b; }
+        :root {
+            --cyan: #00f0ff;
+            --green: #00ff41;
+            --magenta: #ff00ff;
+            --purple: #bf00ff;
+            --bg: #06060e;
+        }
+
+        * { scrollbar-width: thin; scrollbar-color: #1a3a3a #06060e; }
         *::-webkit-scrollbar { width: 6px; height: 6px; }
-        *::-webkit-scrollbar-track { background: #18181b; }
-        *::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+        *::-webkit-scrollbar-track { background: #06060e; }
+        *::-webkit-scrollbar-thumb { background: #1a3a3a; border-radius: 3px; }
 
+        /* ── CRT Scanline Overlay ──────────────── */
+        #crt-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 1px, transparent 1px, transparent 3px);
+            pointer-events: none; z-index: 9997;
+        }
+
+        /* ── Matrix Rain Canvas ────────────────── */
+        #matrix-canvas {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 0;
+            opacity: 0.08;
+        }
+
+        /* ── Body Background ───────────────────── */
         body {
-            background:
-                radial-gradient(ellipse at 15% 0%, rgba(157, 78, 221, 0.07) 0%, transparent 50%),
-                radial-gradient(ellipse at 85% 100%, rgba(181, 23, 158, 0.05) 0%, transparent 50%),
-                linear-gradient(180deg, #0a0a0f 0%, #09090b 100%);
-            font-family: 'Inter', system-ui, sans-serif;
+            background: radial-gradient(ellipse at 20% 0%, rgba(0,240,255,0.04) 0%, transparent 50%),
+                        radial-gradient(ellipse at 80% 100%, rgba(191,0,255,0.03) 0%, transparent 50%),
+                        linear-gradient(180deg, #050510 0%, #06060e 100%);
+            font-family: 'JetBrains Mono', monospace;
         }
 
-        .glass-card {
-            background: rgba(24, 24, 27, 0.65);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(124, 58, 237, 0.12);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.02);
-        }
-
-        .glass-card-hover:hover {
-            border-color: rgba(157, 78, 221, 0.3);
-            box-shadow: 0 8px 40px rgba(157, 78, 221, 0.12);
-        }
-
+        /* ── Sidebar ──────────────────────────── */
         .sidebar-item {
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             border-left: 2px solid transparent;
+            animation: slideInLeft 0.4s ease-out backwards;
         }
+        .sidebar-item:nth-child(1) { animation-delay: 0.05s; }
+        .sidebar-item:nth-child(2) { animation-delay: 0.1s; }
+        .sidebar-item:nth-child(3) { animation-delay: 0.15s; }
+        .sidebar-item:nth-child(4) { animation-delay: 0.2s; }
+        .sidebar-item:nth-child(5) { animation-delay: 0.25s; }
+        .sidebar-item:nth-child(6) { animation-delay: 0.3s; }
+        .sidebar-item:nth-child(7) { animation-delay: 0.35s; }
+        .sidebar-item:nth-child(8) { animation-delay: 0.4s; }
+        .sidebar-item:nth-child(9) { animation-delay: 0.45s; }
         .sidebar-item:hover {
-            background: rgba(157, 78, 221, 0.08);
-            border-left-color: rgba(157, 78, 221, 0.35);
+            background: rgba(0, 240, 255, 0.05);
+            border-left-color: rgba(0, 240, 255, 0.4);
         }
         .sidebar-item.active {
-            background: rgba(157, 78, 221, 0.12);
-            border-left-color: #9d4edd;
+            background: rgba(0, 240, 255, 0.08);
+            border-left-color: var(--cyan);
         }
-        .sidebar-item.active i,
-        .sidebar-item.active span {
-            color: #c084fc !important;
+        .sidebar-item.active i, .sidebar-item.active span { color: var(--cyan) !important; }
+        .sidebar-item i { transition: transform 0.3s ease; }
+        .sidebar-item:hover i { transform: scale(1.15); }
+
+        /* ── Glass Card ────────────────────────── */
+        .glass-card {
+            background: rgba(6, 6, 14, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(0, 240, 255, 0.08);
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5), inset 0 0 30px rgba(0, 240, 255, 0.02);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .glass-card::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            border-radius: inherit;
+            background: linear-gradient(135deg, rgba(0,240,255,0.04) 0%, transparent 50%, rgba(191,0,255,0.02) 100%);
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+        .glass-card:hover::before { opacity: 1; }
+        .glass-card:hover {
+            border-color: rgba(0, 240, 255, 0.2);
+            box-shadow: 0 8px 40px rgba(0, 240, 255, 0.08), 0 0 60px rgba(0, 240, 255, 0.03);
+            transform: translateY(-1px);
         }
 
-        .progress-bar {
-            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.4s ease;
+        /* ── Button styles ─────────────────────── */
+        .btn-neon {
+            position: relative;
+            background: linear-gradient(135deg, rgba(0,240,255,0.1), rgba(191,0,255,0.1));
+            border: 1px solid rgba(0,240,255,0.2);
+            color: var(--cyan);
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+        .btn-neon:hover {
+            background: linear-gradient(135deg, rgba(0,240,255,0.2), rgba(191,0,255,0.15));
+            border-color: var(--cyan);
+            box-shadow: 0 0 20px rgba(0,240,255,0.2), 0 0 40px rgba(0,240,255,0.1);
+        }
+        .btn-neon:active {
+            transform: scale(0.97);
         }
 
+        /* ── Terminal ─────────────────────────── */
         .terminal-bg {
-            background: #050505;
+            background: #030308;
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            position: relative;
         }
-        .terminal-line { line-height: 1.6; }
-        .terminal-line.info { color: #71717a; }
-        .terminal-line.warn { color: #f59e0b; }
-        .terminal-line.error { color: #ef4444; }
-        .terminal-line.success { color: #22c55e; }
-        .terminal-line.system { color: #c084fc; }
-        .terminal-line.command { color: #22c55e; }
-        .terminal-line.default { color: #e4e4e7; }
+        .terminal-bg::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,240,255,0.008) 2px, rgba(0,240,255,0.008) 4px);
+            pointer-events: none;
+        }
+        .terminal-line { line-height: 1.6; animation: fadeIn 0.15s ease-out; white-space: pre-wrap; word-break: break-all; }
+        .terminal-line.info { color: #6a6a7a; }
+        .terminal-line.warn { color: #ffaa33; text-shadow: 0 0 4px rgba(255,170,51,0.2); }
+        .terminal-line.error { color: #ff3366; text-shadow: 0 0 6px rgba(255,51,102,0.25); }
+        .terminal-line.success { color: #00ff41; text-shadow: 0 0 6px rgba(0,255,65,0.2); }
+        .terminal-line.system { color: #00f0ff; text-shadow: 0 0 6px rgba(0,240,255,0.2); }
+        .terminal-line.command { color: #00ff41; }
+        .terminal-line.chat { color: #ff79c6; text-shadow: 0 0 4px rgba(255,121,198,0.15); }
+        .terminal-line.join { color: #50fa7b; }
+        .terminal-line.leave { color: #ff5555; }
+        .terminal-line.death { color: #ff6b6b; text-shadow: 0 0 4px rgba(255,107,107,0.15); }
+        .terminal-line.advancement { color: #ffb86c; text-shadow: 0 0 4px rgba(255,184,108,0.15); }
+        .terminal-line.tick { color: #6272a4; }
+        .terminal-line.debug { color: #8be9fd; font-style: italic; }
+        .terminal-line.default { color: #b0b0c0; }
+        .terminal-cursor::after {
+            content: '▊';
+            animation: blink 1s step-end infinite;
+            color: var(--cyan);
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
 
+        /* ── Buttons ────────────────────────────── */
         .btn-glow {
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .btn-glow::after {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 0; height: 0;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s ease, height 0.6s ease;
+        }
+        .btn-glow:active::after {
+            width: 200px;
+            height: 200px;
         }
         .btn-glow:hover {
             transform: translateY(-2px);
@@ -107,37 +210,69 @@
         .btn-glow:active { transform: translateY(0); }
         .btn-glow:disabled { opacity: 0.35; cursor: not-allowed; transform: none; box-shadow: none; }
 
-        .spinner {
-            animation: spin 1s linear infinite;
+        .btn-scale {
+            transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
+        .btn-scale:hover { transform: scale(1.05); }
+        .btn-scale:active { transform: scale(0.95); }
+
+        .spinner { animation: spin 1s linear infinite; }
         @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
 
+        /* ── Status ─────────────────────────────── */
         .status-pulse {
             animation: statusPulse 2s ease-in-out infinite;
         }
         @keyframes statusPulse {
             0%, 100% { opacity: 1; box-shadow: 0 0 6px currentColor; }
-            50% { opacity: 0.5; box-shadow: 0 0 12px currentColor; }
+            50% { opacity: 0.5; box-shadow: 0 0 16px currentColor; }
         }
 
+        .status-dot-online {
+            animation: breatheGreen 3s ease-in-out infinite;
+        }
+        @keyframes breatheGreen {
+            0%, 100% { box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
+            50% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.8), 0 0 20px rgba(34, 197, 94, 0.3); }
+        }
+
+        /* ── Section transitions ────────────────── */
         .section-content {
-            animation: fadeIn 0.25s ease-out;
+            animation: fadeIn 0.3s ease-out;
         }
-
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
+            from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
+        .section-content-stagger > * {
+            animation: fadeIn 0.4s ease-out backwards;
+        }
+        .section-content-stagger > *:nth-child(1) { animation-delay: 0.05s; }
+        .section-content-stagger > *:nth-child(2) { animation-delay: 0.1s; }
+        .section-content-stagger > *:nth-child(3) { animation-delay: 0.15s; }
+        .section-content-stagger > *:nth-child(4) { animation-delay: 0.2s; }
+        .section-content-stagger > *:nth-child(5) { animation-delay: 0.25s; }
+        .section-content-stagger > *:nth-child(6) { animation-delay: 0.3s; }
+
+        /* ── Modals ─────────────────────────────── */
         .modal-overlay {
             background: rgba(0, 0, 0, 0.78);
             backdrop-filter: blur(10px);
             animation: fadeIn 0.2s ease-out;
         }
+        .modal-content {
+            animation: bounceIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes bounceIn {
+            0% { opacity: 0; transform: scale(0.9) translateY(10px); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
 
+        /* ── Badges ─────────────────────────────── */
         .port-badge {
             padding: 4px 10px;
             border-radius: 6px;
@@ -156,54 +291,13 @@
             border: 1px solid rgba(239, 68, 68, 0.3);
         }
 
-        .plugin-card {
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            border: 1px solid rgba(124, 58, 237, 0.08);
-        }
-.plugin-card:hover {
-    transform: translateY(-4px);
-    border-color: rgba(157, 78, 221, 0.3);
-    box-shadow: 0 16px 48px rgba(157, 78, 221, 0.14);
-}
-
-.essential-card {
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid rgba(124, 58, 237, 0.08);
-}
-.essential-card:hover {
-    transform: translateY(-3px);
-    border-color: rgba(157, 78, 221, 0.35);
-    box-shadow: 0 12px 36px rgba(157, 78, 221, 0.18);
-}
-
-        .install-btn {
-            transition: all 0.2s ease;
-        }
-        .install-btn:hover:not(:disabled) {
-            box-shadow: 0 4px 18px rgba(124, 58, 237, 0.45);
-            transform: scale(1.03);
-        }
-        .install-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.plugin-progress-bar {
-    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.plugin-progress-bar.error { background: linear-gradient(90deg, #ef4444, #dc2626); }
-.plugin-progress-bar.complete { background: linear-gradient(90deg, #22c55e, #16a34a); }
-
-        .file-row { transition: background 0.15s ease; }
-        .file-row:hover { background: rgba(157, 78, 221, 0.04); }
-        .file-name { cursor: pointer; transition: color 0.15s ease; }
-        .file-name:hover { color: #c084fc; }
-        .breadcrumb-item { cursor: pointer; transition: color 0.15s ease; }
-        .breadcrumb-item:hover { color: #c084fc; }
-
         .tab-badge {
             padding: 3px 10px;
             border-radius: 6px;
             font-size: 10px;
             font-weight: 700;
             letter-spacing: 1px;
+            transition: all 0.3s ease;
         }
         .tab-badge.online {
             background: rgba(34, 197, 94, 0.12);
@@ -222,108 +316,202 @@
         }
         .tab-badge.update-available {
             background: rgba(124, 58, 237, 0.15);
-            color: #c084fc;
-            border: 1px solid rgba(124, 58, 237, 0.4);
+            color: var(--cyan);
         }
 
-        .input-field {
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        }
-        .input-field:focus {
-            outline: none;
-            border-color: rgba(157, 78, 221, 0.6);
-            box-shadow: 0 0 0 3px rgba(157, 78, 221, 0.1);
-        }
-
-        .metric-card {
-            transition: all 0.3s ease;
-        }
-        .metric-card:hover {
-            border-color: rgba(157, 78, 221, 0.3);
-        }
-
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 48px;
-            height: 26px;
-            flex-shrink: 0;
-        }
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
+        /* ── Toggle switch (cyberpunk) ──────────── */
         .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #3f3f46;
-            transition: 0.3s;
-            border-radius: 26px;
+            width: 42px; height: 24px; background-color: #1a2a2a; border-radius: 12px;
+            cursor: pointer; position: relative; flex-shrink: 0;
+            transition: 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            border: 1px solid rgba(0,240,255,0.1);
         }
         .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 18px;
-            width: 18px;
-            left: 4px;
-            bottom: 4px;
-            background-color: #a1a1aa;
-            transition: 0.3s;
+            content: ''; position: absolute; top: 2px; left: 2px;
+            width: 18px; height: 18px;
+            background-color: #3a5a5a;
+            transition: 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
             border-radius: 50%;
         }
         input:checked + .toggle-slider {
-            background-color: rgba(157, 78, 221, 0.5);
-            box-shadow: 0 0 12px rgba(157, 78, 221, 0.3);
+            background-color: rgba(0, 240, 255, 0.15);
+            border-color: var(--cyan);
+            box-shadow: 0 0 12px rgba(0, 240, 255, 0.2);
         }
         input:checked + .toggle-slider:before {
             transform: translateX(22px);
-            background-color: #9d4edd;
+            background-color: var(--cyan);
+            box-shadow: 0 0 8px rgba(0, 240, 255, 0.5);
         }
-        input:checked + .toggle-slider {
-            background-color: rgba(157, 78, 221, 0.6);
-        }
+        .toggle-slider:active:before { width: 22px; }
+        input:checked + .toggle-slider:active:before { transform: translateX(18px); }
 
+        /* ── Options ────────────────────────────── */
         .options-row {
-            transition: background 0.15s ease;
+            transition: background 0.15s ease, padding-left 0.2s ease;
         }
         .options-row:hover {
-            background: rgba(157, 78, 221, 0.04);
+            background: rgba(0, 240, 255, 0.03);
+            padding-left: 4px;
         }
 
+        /* ── Update steps ───────────────────────── */
         .step-glow {
-            box-shadow: 0 0 10px rgba(157, 78, 221, 0.8), 0 0 20px rgba(157, 78, 221, 0.4);
-            background: linear-gradient(90deg, #9d4edd, #b5179e) !important;
+            box-shadow: 0 0 10px rgba(0,240,255,0.6), 0 0 20px rgba(0,240,255,0.3);
+            background: linear-gradient(90deg, #00f0ff, #bf00ff) !important;
+            animation: pulseGlow 1.5s ease-in-out infinite;
         }
-
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 10px rgba(0,240,255,0.6), 0 0 20px rgba(0,240,255,0.3); }
+            50% { box-shadow: 0 0 15px rgba(0,240,255,0.8), 0 0 30px rgba(0,240,255,0.5); }
+        }
+        .step-complete {
+            animation: stepComplete 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes stepComplete {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.3); }
+            100% { transform: scale(1); }
+        }
         .glow-text {
-            text-shadow: 0 0 20px rgba(157, 78, 221, 0.4);
+            text-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
+        }
+        .metric-glow {
+            box-shadow: inset 0 1px 0 rgba(0,240,255,0.05), 0 4px 20px rgba(0,0,0,0.3);
         }
 
-        .metric-glow {
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 20px rgba(0,0,0,0.3);
+        /* ── Toast ──────────────────────────────── */
+        .toast {
+            animation: slideDown 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes slideDown {
+            0% { opacity: 0; transform: translateY(-20px) scale(0.95); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .toast-exit {
+            animation: toastExit 0.3s ease-in forwards;
+        }
+        @keyframes toastExit {
+            0% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-20px); }
+        }
+
+        /* ── Entrance Animations ────────────────── */
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-float {
+            animation: float 6s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+        .console-preview-line {
+            animation: slideInRight 0.2s ease-out;
+        }
+        .shimmer-loading {
+            background: linear-gradient(90deg, rgba(6,6,14,0.6) 25%, rgba(10,30,30,0.6) 50%, rgba(6,6,14,0.6) 75%);
+            background-size: 200% 100%;
+            animation: shimmerMove 1.5s infinite;
+        }
+        @keyframes shimmerMove {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .deploy-line { animation: fadeIn 0.2s ease-out; }
+        .badge-pulse {
+            animation: badgePulse 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes badgePulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.4); }
+            100% { transform: scale(1); }
+        }
+        .ripple { position: relative; overflow: hidden; }
+        .ripple::after {
+            content: '';
+            position: absolute; border-radius: 50%;
+            background: rgba(0,240,255,0.15);
+            width: 100px; height: 100px;
+            margin-top: -50px; margin-left: -50px;
+            top: 50%; left: 50%;
+            transform: scale(0); opacity: 0;
+        }
+        .ripple:not(:disabled):active::after {
+            animation: rippleAnim 0.6s ease-out;
+        }
+        @keyframes rippleAnim {
+            0% { transform: scale(0); opacity: 0.5; }
+            100% { transform: scale(4); opacity: 0; }
+        }
+
+        /* ── Input field style ──────────────────── */
+        .input-field {
+            background: rgba(6,6,14,0.6);
+            border: 1px solid rgba(0,240,255,0.1);
+            color: #b0b0c0;
+            transition: all 0.3s ease;
+        }
+        .input-field:focus {
+            border-color: var(--cyan);
+            box-shadow: 0 0 15px rgba(0,240,255,0.1), inset 0 0 15px rgba(0,240,255,0.02);
+            outline: none;
+            color: #e0e0f0;
+        }
+        .input-field::placeholder { color: #3a4a4a; }
+
+        /* ── Scrollbar for terminal ─────────────── */
+        #console-output::-webkit-scrollbar { width: 4px; }
+        #console-output::-webkit-scrollbar-track { background: #030308; }
+        #console-output::-webkit-scrollbar-thumb { background: rgba(0,240,255,0.15); border-radius: 2px; }
+
+        /* ── Player card ────────────────────────── */
+        .player-card {
+            background: rgba(6,6,14,0.5);
+            border: 1px solid rgba(0,240,255,0.06);
+            transition: all 0.3s ease;
+        }
+        .player-card:hover {
+            border-color: rgba(0,240,255,0.15);
+            box-shadow: 0 0 20px rgba(0,240,255,0.05);
+        }
+
+        /* ── Network table ──────────────────────── */
+        .network-cell {
+            border-color: rgba(0,240,255,0.06);
         }
     </style>
 </head>
-<body class="text-zinc-300 min-h-screen flex">
+<body class="text-zinc-300 min-h-screen flex font-mono">
+
+    <!-- ── CRT Scanline Overlay ── -->
+    <div id="crt-overlay"></div>
+    <!-- ── Matrix Rain Canvas ── -->
+    <canvas id="matrix-canvas"></canvas>
 
     <!-- ========================================================== -->
     <!-- LEFT SIDEBAR NAVIGATION -->
     <!-- ========================================================== -->
-    <aside class="w-58 bg-zinc-900/95 border-r border-zinc-800/70 flex flex-col h-screen sticky top-0 z-40">
+    <aside class="w-58 bg-zinc-950/90 border-r border-cyan-500/10 flex flex-col h-screen sticky top-0 z-40 backdrop-blur-sm">
         <!-- Branding -->
-        <div class="p-5 border-b border-zinc-800/70">
+        <div class="p-5 border-b border-cyan-500/10">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-magenta-500 flex items-center justify-center shadow-lg animate-glow-pulse">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center shadow-lg" style="box-shadow: 0 0 20px rgba(0,240,255,0.3);">
                     <i class="fa-solid fa-bolt text-white text-base"></i>
                 </div>
                 <div>
-                    <h1 class="text-white font-bold text-base tracking-tight">PurpleMC</h1>
-                    <p class="text-xs text-zinc-500 tracking-wide">Control Panel</p>
+                    <h1 class="text-white font-bold text-base tracking-tight" style="text-shadow: 0 0 10px rgba(0,240,255,0.3);">PurpleMC</h1>
+                    <p class="text-xs text-cyan-500/70 tracking-widest uppercase">Control Panel</p>
                 </div>
             </div>
         </div>
@@ -331,46 +519,51 @@
         <!-- Navigation Links -->
         <nav class="flex-1 p-3 space-y-0.5">
             <a href="#" onclick="showView('dashboard')" id="nav-dashboard" class="sidebar-item active flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-chart-line text-zinc-500 w-5 text-center"></i>
-                <span class="text-zinc-400">Dashboard</span>
+                <i class="fa-solid fa-chart-line text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">Dashboard</span>
             </a>
             <a href="#" onclick="showView('console')" id="nav-console" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-terminal text-zinc-500 w-5 text-center"></i>
-                <span class="text-zinc-400">Console</span>
+                <i class="fa-solid fa-terminal text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">Console</span>
             </a>
             <a href="#" onclick="showView('files')" id="nav-files" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-folder-open text-zinc-500 w-5 text-center"></i>
-                <span class="text-zinc-400">File Explorer</span>
+                <i class="fa-solid fa-folder-open text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">File Explorer</span>
             </a>
             <a href="#" onclick="showView('marketplace')" id="nav-marketplace" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-store text-zinc-500 w-5 text-center"></i>
-                <span class="text-zinc-400">Marketplace</span>
+                <i class="fa-solid fa-store text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">Marketplace</span>
+            </a>
+            <a href="#" onclick="showView('players')" id="nav-players" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
+                <i class="fa-solid fa-users text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">Players</span>
+                <span id="players-count-badge" class="ml-auto bg-cyan-500/20 text-cyan-400 text-xs px-2 py-0.5 rounded-full hidden">0</span>
             </a>
             <a href="#" onclick="showView('options')" id="nav-options" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-sliders text-zinc-500 w-5 text-center"></i>
-                <span class="text-zinc-400">Server Options</span>
+                <i class="fa-solid fa-sliders text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">Server Options</span>
             </a>
             <a href="#" onclick="showView('network')" id="nav-network" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-network-wired text-zinc-500 w-5 text-center"></i>
-                <span class="text-zinc-400">Network</span>
+                <i class="fa-solid fa-network-wired text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">Network</span>
             </a>
             <a href="#" onclick="showView('settings')" id="nav-settings" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-gear text-zinc-500 w-5 text-center"></i>
-                <span class="text-zinc-400">Settings</span>
+                <i class="fa-solid fa-gear text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">Settings</span>
             </a>
             <a href="#" onclick="showView('updates')" id="nav-updates" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm">
-                <i class="fa-solid fa-cloud-arrow-up text-zinc-500 w-5 text-center"></i>
-                <span class="text-zinc-400">System Updates</span>
+                <i class="fa-solid fa-cloud-arrow-up text-zinc-600 w-5 text-center"></i>
+                <span class="text-zinc-500">System Updates</span>
             </a>
         </nav>
 
         <!-- Server Info Footer -->
-        <div class="p-5 border-t border-zinc-800/70">
-            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-2">Server Address</div>
-            <div class="text-sm text-zinc-300 font-mono" id="server-ip">Loading...</div>
+        <div class="p-5 border-t border-cyan-500/10">
+            <div class="text-xs text-cyan-500/50 uppercase tracking-widest mb-2 font-mono">Server Address</div>
+            <div class="text-sm text-cyan-400 font-mono" id="server-ip">Loading...</div>
             <div class="mt-2 flex items-center gap-2">
-                <div id="status-dot" class="w-2 h-2 rounded-full bg-red-500"></div>
-                <span id="status-label" class="text-xs text-zinc-600">Offline</span>
+                <div id="status-dot" class="w-2 h-2 rounded-full bg-red-500" style="box-shadow: 0 0 6px rgba(255,0,0,0.5);"></div>
+                <span id="status-label" class="text-xs text-zinc-600 font-mono">Offline</span>
             </div>
         </div>
     </aside>
@@ -392,17 +585,17 @@
             <!-- Power Control Buttons -->
             <div class="flex items-center gap-2.5">
                 <button onclick="sendAction('start')" id="btn-start"
-                        class="btn-glow px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white text-sm font-semibold rounded-xl flex items-center gap-2 shadow-lg">
+                        class="btn-glow ripple px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white text-sm font-semibold rounded-xl flex items-center gap-2 shadow-lg">
                     <i class="fa-solid fa-play text-xs"></i>
                     <span>Start</span>
                 </button>
                 <button onclick="sendAction('stop')" id="btn-stop" disabled
-                        class="btn-glow px-5 py-2.5 border border-amber-600/60 text-amber-400 hover:bg-amber-600/10 text-sm font-semibold rounded-xl flex items-center gap-2">
+                        class="btn-glow ripple px-5 py-2.5 border border-amber-600/60 text-amber-400 hover:bg-amber-600/10 text-sm font-semibold rounded-xl flex items-center gap-2">
                     <i class="fa-solid fa-stop text-xs"></i>
                     <span>Stop</span>
                 </button>
                 <button onclick="sendAction('restart')" id="btn-restart" disabled
-                        class="btn-glow px-5 py-2.5 border border-purple-600/60 text-purple-400 hover:bg-purple-600/10 text-sm font-semibold rounded-xl flex items-center gap-2">
+                        class="btn-glow ripple px-5 py-2.5 border border-purple-600/60 text-purple-400 hover:bg-purple-600/10 text-sm font-semibold rounded-xl flex items-center gap-2">
                     <i class="fa-solid fa-rotate-right text-xs"></i>
                     <span>Restart</span>
                 </button>
@@ -414,7 +607,7 @@
         <!-- ====================================================== -->
         <div id="section-dashboard" class="section-content">
             <!-- Metrics Cards Row -->
-            <div class="grid grid-cols-4 gap-4 p-6">
+            <div class="grid grid-cols-4 gap-4 p-6 section-content-stagger">
                 <!-- Status Card -->
                 <div class="glass-card rounded-2xl p-5">
                     <div class="flex items-center justify-between mb-4">
@@ -542,6 +735,25 @@
                     <div class="flex items-center justify-between text-xs text-zinc-600">
                         <span id="console-disk-files">Files: 0</span>
                         <span id="console-disk-folders">Folders: 0</span>
+                    </div>
+                </div>
+
+                <!-- Crash History Card -->
+                <div class="glass-card rounded-2xl p-5 metric-glow col-span-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-xl bg-red-500/10 flex items-center justify-center">
+                                <i class="fa-solid fa-bug text-red-400 text-sm"></i>
+                            </div>
+                            <span class="text-xs text-zinc-500 uppercase tracking-widest font-semibold">Crash History</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="loadCrashLog()" class="btn-neon px-3 py-1.5 text-xs rounded-lg"><i class="fa-solid fa-rotate-right mr-1"></i>Refresh</button>
+                            <button onclick="clearCrashLog()" class="px-3 py-1.5 text-xs rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition"><i class="fa-solid fa-trash-can mr-1"></i>Clear</button>
+                        </div>
+                    </div>
+                    <div id="crash-log-container" class="space-y-2 max-h-48 overflow-y-auto">
+                        <div class="text-xs text-zinc-600 text-center py-4">No crash data recorded</div>
                     </div>
                 </div>
             </div>
@@ -742,6 +954,50 @@
                     </h4>
                     <div id="installed-plugins-list" class="space-y-2">
                         <div class="text-zinc-700 text-sm py-4 text-center">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====================================================== -->
+        <!-- SECTION: PLAYERS -->
+        <!-- ====================================================== -->
+        <div id="section-players" class="section-content hidden">
+            <div class="p-6">
+                <div class="glass-card rounded-2xl overflow-hidden">
+                    <div class="flex items-center justify-between px-6 py-4 bg-zinc-900/60 border-b border-zinc-800/40">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-users text-purple-400 text-lg"></i>
+                            <h3 class="text-white font-semibold">Online Players</h3>
+                            <span id="players-count" class="bg-purple-600/30 text-purple-300 text-xs px-2.5 py-0.5 rounded-full font-semibold">0</span>
+                        </div>
+                        <button onclick="refreshPlayers()" class="text-zinc-500 hover:text-purple-300 text-sm px-3 py-1.5 rounded-lg hover:bg-zinc-800/50 transition">
+                            <i class="fa-solid fa-rotate mr-1"></i>Refresh
+                        </button>
+                    </div>
+                    <div class="p-6">
+                        <div id="players-list">
+                            <div class="text-zinc-700 text-sm py-8 text-center">Server must be running to see online players.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Command Input -->
+                <div class="glass-card rounded-2xl overflow-hidden mt-6">
+                    <div class="flex items-center justify-between px-6 py-4 bg-zinc-900/60 border-b border-zinc-800/40">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-terminal text-emerald-400 text-lg"></i>
+                            <h3 class="text-white font-semibold">Send Command</h3>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <div class="flex gap-3">
+                            <input id="players-command-input" type="text" placeholder="e.g. /kick Steve" class="flex-1 bg-zinc-900 border border-zinc-700/60 rounded-xl px-4 py-2.5 text-zinc-200 text-sm placeholder-zinc-600 outline-none focus:border-purple-500/50 transition">
+                            <button onclick="sendPlayerCommand()" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition flex items-center gap-2">
+                                <i class="fa-solid fa-paper-plane text-xs"></i>Send
+                            </button>
+                        </div>
+                        <div id="players-command-feedback" class="text-xs text-zinc-600 mt-2 hidden"></div>
                     </div>
                 </div>
             </div>
@@ -1102,58 +1358,242 @@
         <!-- SECTION: SETTINGS -->
         <!-- ====================================================== -->
         <div id="section-settings" class="section-content hidden">
-            <div class="px-6 pb-6">
-                <div class="glass-card rounded-2xl p-6">
-                    <div class="flex items-center gap-3 mb-6">
-                        <div class="w-10 h-10 rounded-xl bg-purple-600/20 flex items-center justify-center">
-                            <i class="fa-solid fa-gear text-purple-400 text-lg"></i>
-                        </div>
-                        <div>
-                            <h3 class="text-lg font-bold text-white">Panel Settings</h3>
-                            <p class="text-xs text-zinc-500 mt-0.5">Configure server launch parameters</p>
+            <div class="px-6 pb-6 space-y-6">
+                <!-- Page Header -->
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-purple-600/20 flex items-center justify-center">
+                        <i class="fa-solid fa-gear text-purple-400 text-lg"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-white">Settings</h3>
+                        <p class="text-xs text-zinc-500 mt-0.5">Configure every aspect of your server and panel</p>
+                    </div>
+                </div>
+
+                <!-- ===== Tabs ===== -->
+                <div id="settings-tabs" class="flex gap-1 bg-zinc-900/60 rounded-xl p-1.5 overflow-x-auto">
+                    <button data-tab="settings-server" class="settings-tab active bg-purple-600/20 text-white px-4 py-2 text-sm font-medium rounded-lg transition whitespace-nowrap" onclick="switchSettingsTab('settings-server')"><i class="fa-solid fa-server mr-1.5 text-xs"></i>Server</button>
+                    <button data-tab="settings-java" class="settings-tab px-4 py-2 text-sm font-medium rounded-lg text-zinc-400 hover:text-white transition whitespace-nowrap" onclick="switchSettingsTab('settings-java')"><i class="fa-brands fa-java mr-1.5 text-xs"></i>Java & Performance</button>
+                    <button data-tab="settings-gameplay" class="settings-tab px-4 py-2 text-sm font-medium rounded-lg text-zinc-400 hover:text-white transition whitespace-nowrap" onclick="switchSettingsTab('settings-gameplay')"><i class="fa-solid fa-gamepad mr-1.5 text-xs"></i>Gameplay</button>
+                    <button data-tab="settings-network" class="settings-tab px-4 py-2 text-sm font-medium rounded-lg text-zinc-400 hover:text-white transition whitespace-nowrap" onclick="switchSettingsTab('settings-network')"><i class="fa-solid fa-wifi mr-1.5 text-xs"></i>Network</button>
+                    <button data-tab="settings-backups" class="settings-tab px-4 py-2 text-sm font-medium rounded-lg text-zinc-400 hover:text-white transition whitespace-nowrap" onclick="switchSettingsTab('settings-backups')"><i class="fa-solid fa-hard-drive mr-1.5 text-xs"></i>Backups</button>
+                    <button data-tab="settings-panel" class="settings-tab px-4 py-2 text-sm font-medium rounded-lg text-zinc-400 hover:text-white transition whitespace-nowrap" onclick="switchSettingsTab('settings-panel')"><i class="fa-solid fa-sliders mr-1.5 text-xs"></i>Panel</button>
+                </div>
+
+                <!-- Toast -->
+                <div id="settings-success" class="toast hidden px-4 py-3 bg-emerald-600/10 border border-emerald-600/30 rounded-xl">
+                    <p class="text-emerald-400 text-sm flex items-center gap-2"><i class="fa-solid fa-check-circle"></i>Settings saved successfully</p>
+                </div>
+
+                <!-- ===== Tab: Server ===== -->
+                <div id="settings-server" class="settings-panel">
+                    <div class="glass-card rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-5 flex items-center gap-2"><i class="fa-solid fa-server text-purple-400 text-sm"></i>Server Configuration</h4>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <div class="flex items-center justify-between mb-3">
+                                    <label class="block text-sm font-semibold text-zinc-300"><i class="fa-solid fa-memory text-purple-400 mr-1.5 text-xs"></i>Max RAM</label>
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <span class="text-xs text-zinc-500">Auto</span>
+                                        <input type="checkbox" id="setting-autoResource" class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-cyan-400 focus:ring-cyan-500">
+                                    </label>
+                                </div>
+                                <select id="setting-ram" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200"></select>
+                                <div id="resource-info" class="hidden mt-3 p-3 rounded-xl bg-cyan-500/5 border border-cyan-500/20 text-xs space-y-1.5">
+                                    <div class="flex items-center gap-2 text-cyan-400"><i class="fa-solid fa-microchip text-xs"></i><span id="resource-cpu"></span></div>
+                                    <div class="flex items-center gap-2 text-emerald-400"><i class="fa-solid fa-memory text-xs"></i><span id="resource-ram"></span></div>
+                                    <div class="flex items-center gap-2 text-purple-400"><i class="fa-solid fa-star text-xs"></i><span id="resource-recommended"></span></div>
+                                </div>
+                                <p class="text-xs text-zinc-600 mt-2">Memory allocation for the server process</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-tag text-purple-400 mr-1.5 text-xs"></i>Minecraft Version</label>
+                                <select id="setting-serverVersion" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                    <option value="1.16.5">1.16.5</option>
+                                    <option value="1.17.1">1.17.1</option>
+                                    <option value="1.18.2">1.18.2</option>
+                                    <option value="1.19.4">1.19.4</option>
+                                    <option value="1.20.1">1.20.1</option>
+                                    <option value="1.20.4" selected>1.20.4</option>
+                                    <option value="1.21">1.21</option>
+                                </select>
+                                <p class="text-xs text-zinc-600 mt-2">Server version for auto-download (new installs only)</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40 lg:col-span-2">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-power-off text-purple-400 mr-1.5 text-xs"></i>Server Behavior</label>
+                                <div class="flex flex-wrap gap-6">
+                                    <label class="flex items-center gap-3 cursor-pointer">
+                                        <input type="checkbox" id="setting-autoRestart" class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500">
+                                        <span class="text-sm text-zinc-300">Auto-restart on crash</span>
+                                    </label>
+                                    <label class="flex items-center gap-3 cursor-pointer">
+                                        <input type="checkbox" id="setting-autoStart" class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500">
+                                        <span class="text-sm text-zinc-300">Auto-start with panel</span>
+                                    </label>
+                                    <label class="flex items-center gap-3 cursor-pointer">
+                                        <input type="checkbox" id="setting-whitelist" class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500">
+                                        <span class="text-sm text-zinc-300">Whitelist</span>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                </div>
 
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <!-- RAM Allocation -->
-                        <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
-                            <label class="block text-sm font-semibold text-zinc-300 mb-3">
-                                <i class="fa-solid fa-memory text-purple-400 mr-2 text-xs"></i>
-                                Max RAM Allocation
-                            </label>
-                            <select id="setting-ram" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
-                                <option value="2G">2 GB</option>
-                                <option value="4G">4 GB</option>
-                                <option value="6G">6 GB</option>
-                                <option value="8G">8 GB</option>
-                                <option value="12G">12 GB</option>
-                                <option value="16G">16 GB</option>
-                            </select>
-                            <p class="text-xs text-zinc-600 mt-2">Maximum memory allocated to the Minecraft server process</p>
+                <!-- ===== Tab: Java & Performance ===== -->
+                <div id="settings-java" class="settings-panel hidden">
+                    <div class="glass-card rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-5 flex items-center gap-2"><i class="fa-brands fa-java text-purple-400 text-sm"></i>Java & Performance</h4>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-terminal text-purple-400 mr-1.5 text-xs"></i>Java Path</label>
+                                <input type="text" id="setting-javaPath" placeholder="java" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200">
+                                <p class="text-xs text-zinc-600 mt-2">Path to Java executable (e.g. /usr/bin/java)</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-eye text-purple-400 mr-1.5 text-xs"></i>View Distance</label>
+                                <select id="setting-viewDistance" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                    <option value="2">2 (Low)</option>
+                                    <option value="4">4</option>
+                                    <option value="6">6</option>
+                                    <option value="8">8</option>
+                                    <option value="10" selected>10 (Default)</option>
+                                    <option value="12">12</option>
+                                    <option value="16">16 (High)</option>
+                                </select>
+                                <p class="text-xs text-zinc-600 mt-2">Client view distance in chunks</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40 lg:col-span-2">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-code text-purple-400 mr-1.5 text-xs"></i>JVM Arguments</label>
+                                <textarea id="setting-javaArgs" rows="4" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200 resize-y"></textarea>
+                                <p class="text-xs text-zinc-600 mt-2">Additional flags passed to the JVM. Space-separated.</p>
+                            </div>
                         </div>
+                    </div>
+                </div>
 
-                        <!-- Java Path -->
-                        <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
-                            <label class="block text-sm font-semibold text-zinc-300 mb-3">
-                                <i class="fa-solid fa-terminal text-purple-400 mr-2 text-xs"></i>
-                                Java Executable Path
-                            </label>
-                            <input type="text" id="setting-java" placeholder="java"
-                                   class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200">
-                            <p class="text-xs text-zinc-600 mt-2">Path to the Java runtime executable (e.g., /usr/bin/java)</p>
+                <!-- ===== Tab: Gameplay ===== -->
+                <div id="settings-gameplay" class="settings-panel hidden">
+                    <div class="glass-card rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-5 flex items-center gap-2"><i class="fa-solid fa-gamepad text-purple-400 text-sm"></i>Gameplay Settings</h4>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-signature text-purple-400 mr-1.5 text-xs"></i>Server MOTD</label>
+                                <input type="text" id="setting-motd" placeholder="A PurpleMC Server" maxlength="60" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                <p class="text-xs text-zinc-600 mt-2">Message of the Day shown in the server list</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-users text-purple-400 mr-1.5 text-xs"></i>Max Players</label>
+                                <input type="number" id="setting-maxPlayers" min="0" max="500" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                <p class="text-xs text-zinc-600 mt-2">Maximum concurrent players</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-shield text-purple-400 mr-1.5 text-xs"></i>Difficulty</label>
+                                <select id="setting-difficulty" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                    <option value="peaceful">Peaceful</option>
+                                    <option value="easy">Easy</option>
+                                    <option value="normal">Normal</option>
+                                    <option value="hard">Hard</option>
+                                </select>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-dice text-purple-400 mr-1.5 text-xs"></i>Gamemode</label>
+                                <select id="setting-gamemode" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                    <option value="survival">Survival</option>
+                                    <option value="creative">Creative</option>
+                                    <option value="adventure">Adventure</option>
+                                    <option value="spectator">Spectator</option>
+                                </select>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-shield-halved text-purple-400 mr-1.5 text-xs"></i>Spawn Protection</label>
+                                <input type="number" id="setting-spawnProtection" min="0" max="100" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                <p class="text-xs text-zinc-600 mt-2">Radius in blocks (0 = disabled)</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <div class="flex flex-col gap-4">
+                                    <label class="flex items-center gap-3 cursor-pointer">
+                                        <input type="checkbox" id="setting-pvp" class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500">
+                                        <span class="text-sm text-zinc-300">PvP enabled</span>
+                                    </label>
+                                    <label class="flex items-center gap-3 cursor-pointer">
+                                        <input type="checkbox" id="setting-onlineMode" class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500">
+                                        <span class="text-sm text-zinc-300">Online mode (Mojang auth)</span>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                </div>
 
-                    <div id="settings-success" class="hidden mt-4 p-3 bg-emerald-600/10 border border-emerald-600/30 rounded-xl">
-                        <p class="text-emerald-400 text-sm"><i class="fa-solid fa-check mr-2"></i>Settings saved successfully</p>
+                <!-- ===== Tab: Network ===== -->
+                <div id="settings-network" class="settings-panel hidden">
+                    <div class="glass-card rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-5 flex items-center gap-2"><i class="fa-solid fa-wifi text-purple-400 text-sm"></i>Network</h4>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-plug text-purple-400 mr-1.5 text-xs"></i>Server Port</label>
+                                <input type="number" id="setting-serverPort" min="1" max="65535" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                <p class="text-xs text-zinc-600 mt-2">Minecraft server port (requires restart)</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-display text-purple-400 mr-1.5 text-xs"></i>Panel Port</label>
+                                <input type="number" id="setting-panelPort" min="1" max="65535" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                <p class="text-xs text-zinc-600 mt-2">Web panel port (requires restart)</p>
+                            </div>
+                        </div>
                     </div>
+                </div>
 
-                    <div class="mt-5 flex justify-end">
-                        <button onclick="saveSettings()" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition flex items-center gap-2">
-                            <i class="fa-solid fa-save text-xs"></i>
-                            Save Settings
-                        </button>
+                <!-- ===== Tab: Backups ===== -->
+                <div id="settings-backups" class="settings-panel hidden">
+                    <div class="glass-card rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-5 flex items-center gap-2"><i class="fa-solid fa-hard-drive text-purple-400 text-sm"></i>Backup Configuration</h4>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="flex items-center gap-3 cursor-pointer mb-4">
+                                    <input type="checkbox" id="setting-backupEnabled" class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500">
+                                    <span class="text-sm font-semibold text-zinc-300">Enable automatic backups</span>
+                                </label>
+                                <p class="text-xs text-zinc-600">Schedule periodic world backups</p>
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-clock text-purple-400 mr-1.5 text-xs"></i>Backup Interval (hours)</label>
+                                <input type="number" id="setting-backupInterval" min="1" max="168" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-bookmark text-purple-400 mr-1.5 text-xs"></i>Max Backups to Keep</label>
+                                <input type="number" id="setting-backupMaxKeep" min="1" max="100" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                            </div>
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-earth-americas text-purple-400 mr-1.5 text-xs"></i>Worlds to Backup</label>
+                                <input type="text" id="setting-backupWorlds" placeholder="world,world_nether,world_the_end" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                <p class="text-xs text-zinc-600 mt-2">Comma-separated world folder names</p>
+                            </div>
+                        </div>
                     </div>
+                </div>
+
+                <!-- ===== Tab: Panel ===== -->
+                <div id="settings-panel" class="settings-panel hidden">
+                    <div class="glass-card rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-5 flex items-center gap-2"><i class="fa-solid fa-sliders text-purple-400 text-sm"></i>Panel Preferences</h4>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                            <div class="bg-zinc-900/40 rounded-xl p-5 border border-zinc-800/40">
+                                <label class="block text-sm font-semibold text-zinc-300 mb-3"><i class="fa-solid fa-list text-purple-400 mr-1.5 text-xs"></i>Console Max Lines</label>
+                                <input type="number" id="setting-consoleMaxLines" min="100" max="5000" step="100" class="input-field w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200">
+                                <p class="text-xs text-zinc-600 mt-2">Maximum lines kept in the console buffer</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Save Button (global) -->
+                <div class="flex justify-end sticky bottom-0 py-3">
+                    <button onclick="saveSettings()" class="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white text-sm font-semibold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-purple-600/20">
+                        <i class="fa-solid fa-floppy-disk text-xs"></i>
+                        Save All Settings
+                    </button>
                 </div>
             </div>
         </div>
@@ -1291,7 +1731,7 @@
                             <span id="deploy-percent-text" class="text-sm font-mono text-purple-400">0%</span>
                         </div>
                         <div class="h-2 bg-zinc-800 rounded-full overflow-hidden mb-2">
-                            <div id="deploy-progress-bar" class="h-full rounded-full bg-gradient-to-r from-purple-600 to-magenta-500 transition-all duration-700" style="width: 0%"></div>
+                            <div id="deploy-progress-bar" class="h-full rounded-full transition-all duration-700" style="width: 0%; background: linear-gradient(90deg, #7c3aed, #ff00ff);"></div>
                         </div>
                         <div class="flex items-center justify-between text-xs text-zinc-600">
                             <span id="deploy-eta-text">Connecting to deployment service...</span>
@@ -1346,7 +1786,7 @@
     <!-- MODAL: FILE EDITOR -->
     <!-- ========================================================== -->
     <div id="file-editor-modal" class="fixed inset-0 modal-overlay flex items-center justify-center z-50 hidden">
-        <div class="glass-card rounded-2xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col animate-slide-up">
+        <div class="glass-card rounded-2xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col modal-content">
             <!-- Modal Header -->
             <div class="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800/40">
                 <div class="flex items-center gap-3">
@@ -1391,7 +1831,7 @@
     <!-- MODAL: CREATE NEW FILE / FOLDER -->
     <!-- ========================================================== -->
     <div id="create-item-modal" class="fixed inset-0 modal-overlay flex items-center justify-center z-50 hidden">
-        <div class="glass-card rounded-2xl p-6 max-w-md w-full mx-4 animate-slide-up">
+        <div class="glass-card rounded-2xl p-6 max-w-md w-full mx-4 modal-content">
             <h3 class="text-lg font-bold text-white mb-1" id="create-modal-title">
                 <i class="fa-solid fa-folder-plus text-yellow-400 mr-2"></i>New Folder
             </h3>
@@ -1418,6 +1858,52 @@
     <!-- ========================================================== -->
     <script>
         // ================================================================
+        // MATRIX RAIN EFFECT (hacker aesthetic)
+        // ================================================================
+        (function() {
+            const canvas = document.getElementById('matrix-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            let cols, drops;
+
+            function resize() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                cols = Math.floor(canvas.width / 14);
+                drops = Array(cols).fill(1);
+            }
+            resize();
+            window.addEventListener('resize', resize);
+
+            const chars = '01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンABCDEF';
+            function draw() {
+                ctx.fillStyle = 'rgba(6,6,14,0.05)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#00f0ff';
+                ctx.font = '13px monospace';
+                for (let i = 0; i < drops.length; i++) {
+                    const char = chars[Math.floor(Math.random() * chars.length)];
+                    ctx.fillText(char, i * 14, drops[i] * 14);
+                    if (drops[i] * 14 > canvas.height && Math.random() > 0.975) drops[i] = 0;
+                    drops[i]++;
+                }
+            }
+            setInterval(draw, 45);
+        })();
+
+        // ================================================================
+        // PLUGIN MARKET ICON FALLBACK
+        // ================================================================
+        function fallbackIcon(el, html) {
+            if (!el || !el.parentNode) return;
+            el.parentNode.outerHTML = html;
+        }
+        function fallbackIconSimple(el) {
+            if (!el || !el.parentNode) return;
+            el.parentNode.innerHTML = '<i class="fa-solid fa-puzzle-piece text-cyan-400 text-lg"></i>';
+        }
+
+        // ================================================================
         // SOCKET.IO CONNECTION & GLOBAL STATE
         // ================================================================
         const socket = io();
@@ -1442,6 +1928,8 @@
         let historyReconstructed = false;
         let historyLengthAtConnect = 0;
         let currentProperties = {};
+        let isOnline = false;
+        let propsDirty = false;
 
         // ================================================================
         // CONSOLE LOGGING UTILITY
@@ -1505,8 +1993,17 @@
             if (lower.includes('[error]') || lower.includes('exception') || lower.includes('fatal')) return 'error';
             if (lower.includes('[warn]') || lower.includes('warning')) return 'warn';
             if (lower.includes('[info]')) return 'info';
-            if (lower.includes('done') || lower.includes('complete') || lower.includes('success')) return 'success';
-            if (lower.includes('system') || lower.includes('started') || lower.includes('stopped') || lower.includes('running')) return 'system';
+            if (lower.includes(' done (') || lower.includes('done in ')) return 'success';
+            if (lower.includes('complete') || lower.includes('success')) return 'success';
+            if (lower.includes('system') || lower.includes('started') || lower.includes('running')) return 'system';
+            if (lower.includes('joined the game') || lower.includes('logged in')) return 'join';
+            if (lower.includes('left the game') || lower.includes('logged out')) return 'leave';
+            if (lower.includes('was slain') || lower.includes('was shot') || lower.includes('was killed') || lower.includes('drowned') || lower.includes('fell from') || lower.includes('blew up') || lower.includes('hit the ground') || lower.includes('burned') || lower.includes('lightning') || lower.includes('pricked') || lower.includes('suffocated') || lower.includes('starved') || lower.includes('died')) return 'death';
+            if (lower.includes('has made the advancement') || lower.includes('has completed the challenge') || lower.includes('has reached the goal')) return 'advancement';
+            if (lower.includes('<') && (lower.includes('>') || lower.includes('»'))) return 'chat';
+            if (lower.includes('mspt') || lower.includes('tps:') || lower.includes('memory:') || lower.includes('tick:')) return 'tick';
+            if (lower.includes('[debug]') || lower.includes('[fine]') || lower.includes('[finer]')) return 'debug';
+            if (lower.includes('preparing spawn') || lower.includes('loading world') || lower.includes('loaded world') || lower.includes('default game type') || lower.includes('setting spawn')) return 'success';
             return 'default';
         }
 
@@ -1571,7 +2068,7 @@
                 const entry = entries[i];
                 // Ensure we always have a valid type string — default to 'default'
                 // if the backend sent an unexpected classification.
-                const safeType = String(entry.type || 'default').toLowerCase();
+                const safeType = (entry.type || 'default').toLowerCase();
 
                 const elFull = document.createElement('div');
                 elFull.className = 'terminal-line ' + safeType + ' text-sm';
@@ -1690,7 +2187,7 @@
         }
 
         socket.on('stats', function(stats) {
-            updateMetricsDisplay(stats.cpu, stats.memory);
+            updateMetricsDisplay(stats.cpu, stats.memory, stats.uptime, stats.allocation);
             updateConsoleMetrics(stats);
         });
 
@@ -1738,16 +2235,28 @@
             }
         }
 
-        function updateMetricsDisplay(cpu, memory) {
+        function updateMetricsDisplay(cpu, memory, uptime, allocation) {
             cpuText.textContent = cpu + '%';
-            cpuBar.style.width = cpu + '%';
+            cpuText.classList.remove('pop');
+            void cpuText.offsetWidth;
+            cpuText.classList.add('pop');
+
+            cpuBar.style.width = Math.min(cpu, 100) + '%';
             cpuBar.className = 'h-full rounded-full progress-bar ' + (cpu > 85 ? 'bg-red-500' : cpu > 60 ? 'bg-amber-500' : 'bg-zinc-500');
 
+            const maxRam = allocation && allocation.maxRam ? allocation.maxRam : '2G';
+            const maxRamMB = parseInt(maxRam) * 1024;
             const ramGB = (memory / 1024).toFixed(1);
-            const ramPercent = Math.min((memory / 2048) * 100, 100);
-            ramText.textContent = ramGB + ' / 2 GB';
+            const ramPercent = maxRamMB > 0 ? Math.min((memory / maxRamMB) * 100, 100) : 0;
+            ramText.textContent = ramGB + ' / ' + maxRam + 'B';
+            ramText.classList.remove('pop');
+            void ramText.offsetWidth;
+            ramText.classList.add('pop');
+
             ramBar.style.width = ramPercent + '%';
             ramBar.className = 'h-full rounded-full progress-bar ' + (ramPercent > 85 ? 'bg-red-500' : ramPercent > 60 ? 'bg-amber-500' : 'bg-purple-600');
+
+            if (uptime !== undefined) updateUptimeDisplay(uptime);
         }
 
         function updateConsoleMetrics(stats) {
@@ -1808,6 +2317,59 @@
         }
 
         // ================================================================
+        // CRASH LOG VIEWER
+        // ================================================================
+        async function loadCrashLog() {
+            const container = document.getElementById('crash-log-container');
+            if (!container) return;
+            try {
+                const res = await fetch('/api/crash-log');
+                const data = await res.json();
+                if (!data.success || !data.logs || data.logs.length === 0) {
+                    container.innerHTML = '<div class="text-xs text-zinc-600 text-center py-4">No crash data recorded</div>';
+                    return;
+                }
+                const reversed = data.logs.slice().reverse().slice(0, 10);
+                let html = '';
+                for (const entry of reversed) {
+                    const date = new Date(entry.timestamp);
+                    const time = date.toLocaleString();
+                    const severityColor = entry.severity === 'critical' ? 'text-red-400' : entry.severity === 'high' ? 'text-orange-400' : 'text-yellow-400';
+                    const reasonIcon = entry.reason === 'out_of_memory' ? 'fa-bolt' : entry.reason === 'world_corruption' ? 'fa-earth-americas' : entry.reason === 'plugin_failure' ? 'fa-puzzle-piece' : 'fa-bug';
+                    html += '<div class="flex items-start gap-3 p-3 rounded-xl bg-zinc-900/30 border border-zinc-800/20 text-xs">' +
+                        '<div class="mt-0.5"><i class="fa-solid ' + reasonIcon + ' ' + severityColor + '"></i></div>' +
+                        '<div class="flex-1 min-w-0">' +
+                            '<div class="flex items-center gap-2 mb-1">' +
+                                '<span class="' + severityColor + ' font-semibold">' + entry.reason.replace(/_/g, ' ') + '</span>' +
+                                '<span class="text-zinc-600">(code ' + entry.exitCode + ')</span>' +
+                                '<span class="text-zinc-700 ml-auto">' + time + '</span>' +
+                            '</div>' +
+                            '<div class="text-zinc-500">' +
+                                (entry.repairs && entry.repairs.length
+                                    ? entry.repairs.map(r => '<div class="mt-1 flex items-center gap-1.5"><i class="fa-solid fa-wrench text-cyan-500/60 text-[10px]"></i><span class="text-zinc-500">' + r.label + '</span></div>').join('')
+                                    : '<span class="text-zinc-700">No automatic repairs available</span>') +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
+                }
+                if (data.logs.length > 10) {
+                    html += '<div class="text-xs text-zinc-700 text-center py-2">' + data.logs.length + ' total crashes logged</div>';
+                }
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = '<div class="text-xs text-red-500 text-center py-4">Failed to load crash log</div>';
+            }
+        }
+
+        async function clearCrashLog() {
+            try {
+                const res = await fetch('/api/crash-log/clear', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) loadCrashLog();
+            } catch {}
+        }
+
+        // ================================================================
         // SERVER CONTROL ACTIONS
         // ================================================================
         function sendAction(action) {
@@ -1827,7 +2389,6 @@
         function clearConsole() {
             consoleOutput.innerHTML = '<div class="terminal-line system text-sm">\u00bb Console cleared</div>';
             consolePreview.innerHTML = '<div class="terminal-line system text-sm">\u00bb Console cleared</div>';
-            logCount = 1;
         }
 
         // ================================================================
@@ -1849,7 +2410,7 @@
                 const data = await res.json();
                 updateStatusDisplay(data.running);
                 if (data.cpu !== undefined) {
-                    updateMetricsDisplay(data.cpu, data.memory || 0);
+                    updateMetricsDisplay(data.cpu, data.memory || 0, data.uptime, data.allocation);
                 }
                 if (data.uptime) {
                     updateUptimeDisplay(data.uptime);
@@ -1857,8 +2418,93 @@
                 if (data.disk) {
                     updateConsoleMetrics({ disk: data.disk, system: null, cpu: data.cpu, memory: data.memory });
                 }
+                // Update player count badge
+                var badgeEl = document.getElementById('players-count-badge');
+                if (badgeEl && data.players) {
+                    badgeEl.textContent = data.players.length;
+                    badgeEl.classList.toggle('hidden', data.players.length === 0);
+                }
             } catch (e) {
                 // Silent fail
+            }
+        }
+
+        function switchSettingsTab(tabId) {
+            document.querySelectorAll('.settings-panel').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.settings-tab').forEach(el => el.classList.remove('active', 'bg-purple-600/20', 'text-white'));
+            document.getElementById(tabId).classList.remove('hidden');
+            const btn = document.querySelector(`[data-tab="${tabId}"]`);
+            if (btn) btn.classList.add('active', 'bg-purple-600/20', 'text-white');
+        }
+
+        function settingsVal(id) {
+            const el = document.getElementById(id);
+            if (!el) return undefined;
+            if (el.type === 'checkbox') return el.checked;
+            if (el.type === 'number') return Number(el.value);
+            return el.value;
+        }
+
+        function setSettingsVal(id, val) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (el.type === 'checkbox') el.checked = !!val;
+            else el.value = val != null ? val : '';
+        }
+
+        function populateRamOptions(max) {
+            const el = document.getElementById('setting-ram');
+            if (!el) return;
+            const current = el.value;
+            el.innerHTML = '';
+            const limit = Math.min(max, 64);
+            for (let gb = 1; gb <= limit; gb++) {
+                const opt = document.createElement('option');
+                opt.value = gb + 'G';
+                opt.textContent = gb + ' GB' + (gb > max ? ' (exceeds system RAM)' : '');
+                if (gb > max) opt.style.color = '#a16207';
+                el.appendChild(opt);
+            }
+            if (current) el.value = current;
+        }
+
+        function toggleResourceMode() {
+            const autoEl = document.getElementById('setting-autoResource');
+            const ramEl = document.getElementById('setting-ram');
+            const infoEl = document.getElementById('resource-info');
+            const isAuto = autoEl && autoEl.checked;
+            if (ramEl) ramEl.disabled = isAuto;
+            if (infoEl) {
+                if (isAuto) {
+                    infoEl.classList.remove('hidden');
+                    loadResourceInfo();
+                } else {
+                    infoEl.classList.add('hidden');
+                }
+            }
+        }
+
+        async function loadResourceInfo() {
+            try {
+                const res = await fetch('/api/system/resources');
+                const data = await res.json();
+                const cpuEl = document.getElementById('resource-cpu');
+                const ramEl = document.getElementById('resource-ram');
+                const recEl = document.getElementById('resource-recommended');
+                const ramSettingEl = document.getElementById('setting-ram');
+                if (data.success && data.system && data.system.ram) {
+                    const totalGB = data.system.ram.totalGB;
+                    if (ramSettingEl) populateRamOptions(Math.floor(totalGB));
+                    if (cpuEl) cpuEl.textContent = 'CPU: ' + data.system.cpu.cores + ' cores @ ' + (data.system.cpu.loadAvg1m || '0').toFixed(1) + ' load';
+                    if (ramEl) ramEl.textContent = 'RAM: ' + data.system.ram.usedGB + ' / ' + data.system.ram.totalGB + ' GB used (' + data.system.ram.usagePercent + '%)';
+                    if (recEl && data.recommended) recEl.textContent = 'Recommended: ' + data.recommended.maxRam + ' (' + Math.round(parseInt(data.recommended.maxRam) / totalGB * 100) + '% of total)';
+                    if (ramSettingEl && data.recommended) ramSettingEl.value = data.recommended.maxRam;
+                } else {
+                    if (ramSettingEl) populateRamOptions(16);
+                }
+            } catch (e) {
+                const ramSettingEl = document.getElementById('setting-ram');
+                if (ramSettingEl) populateRamOptions(16);
             }
         }
 
@@ -1867,11 +2513,14 @@
                 const res = await fetch('/api/settings');
                 const data = await res.json();
                 if (data.success && data.settings) {
-                    document.getElementById('setting-ram').value = data.settings.maxRam || '2G';
-                    document.getElementById('setting-java').value = data.settings.javaPath || 'java';
+                    for (const key of Object.keys(data.settings)) {
+                        setSettingsVal('setting-' + key, data.settings[key]);
+                    }
                 }
+                await loadResourceInfo();
+                toggleResourceMode();
             } catch (e) {
-                // Silent fail
+                populateRamOptions(16);
             }
         }
 
@@ -1883,6 +2532,7 @@
             console: { section: 'section-console', title: 'Console', nav: 'nav-console' },
             files: { section: 'section-files', title: 'File Explorer', nav: 'nav-files' },
             marketplace: { section: 'section-marketplace', title: 'Marketplace', nav: 'nav-marketplace' },
+            players: { section: 'section-players', title: 'Players', nav: 'nav-players' },
             options: { section: 'section-options', title: 'Server Options', nav: 'nav-options' },
             network: { section: 'section-network', title: 'Network', nav: 'nav-network' },
             settings: { section: 'section-settings', title: 'Settings', nav: 'nav-settings' },
@@ -1915,12 +2565,18 @@
             }
 
             switch (viewName) {
+                case 'dashboard':
+                    loadCrashLog();
+                    break;
                 case 'files':
                     loadFileManager('/api/files/list?path=/', '/');
                     break;
                 case 'marketplace':
                     loadEssentialPlugins();
                     loadInstalledPlugins();
+                    break;
+                case 'players':
+                    loadPlayers();
                     break;
                 case 'options':
                     loadServerProperties();
@@ -2371,17 +3027,18 @@
             let html = '';
             for (let i = 0; i < plugins.length; i++) {
                 const p = plugins[i];
+                const iconBg = 'linear-gradient(135deg, rgba(0,240,255,0.15), rgba(191,0,255,0.15))';
+                const fallbackHtml = '<div class="w-12 h-12 rounded-xl flex items-center justify-center" style="background:' + iconBg + '"><i class="fa-solid fa-puzzle-piece text-cyan-400 text-xl"></i></div>';
                 const iconHtml = p.icon
-                    ? '<img src="' + p.icon + '" class="w-12 h-12 rounded-xl object-cover" alt="' + p.name + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
-                      '<div class="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-600/20 to-magenta-500/20 items-center justify-center hidden"><i class="fa-solid fa-puzzle-piece text-purple-400 text-xl"></i></div>'
-                    : '<div class="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-600/20 to-magenta-500/20 flex items-center justify-center"><i class="fa-solid fa-puzzle-piece text-purple-400 text-xl"></i></div>';
+                    ? '<div class="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0"><img src="' + p.icon + '" class="w-full h-full object-cover" alt="' + p.name + '" onerror="fallbackIcon(this,\'' + fallbackHtml.replace(/'/g, "\\'") + '\')"></div>'
+                    : fallbackHtml;
 
                 const badge = p.source === 'modrinth'
                     ? '<span class="absolute top-2 left-2 text-xs bg-blue-600/80 text-blue-200 px-2 py-0.5 rounded-lg">Modrinth</span>'
                     : '<span class="absolute top-2 left-2 text-xs bg-amber-600/80 text-amber-200 px-2 py-0.5 rounded-lg">Spigot</span>';
 
                 const priceTag = p.premium
-                    ? '<span class="text-amber-400 text-xs font-semibold"><i class="fa-solid fa-coins mr-1"></i>$' + p.price + '</span>'
+                    ? '<span class="text-amber-400 text-xs font-semibold"><i class="fa-solid fa-coins mr-1"></i>$' + (p.price || '?') + '</span>'
                     : '<span class="text-emerald-400 text-xs font-semibold">Free</span>';
 
                 const installBtnId = 'install-btn-' + p.id;
@@ -2502,10 +3159,10 @@
                 });
                 const data = await res.json();
 
-                if (!data.success && !installingPlugins[id]) {
-                    updatePluginProgress(id, 'error', 0, data.error || 'Failed');
-                } else if (!data.success) {
-                    updatePluginProgress(id, 'error', 0, data.error || 'Failed');
+                if (!data.success) {
+                    if (installingPlugins[id]) {
+                        updatePluginProgress(id, 'error', 0, data.error || 'Failed');
+                    }
                 }
             } catch (e) {
                 if (installingPlugins[id]) {
@@ -2525,7 +3182,7 @@
                 let html = '';
                 for (let i = 0; i < data.plugins.length; i++) {
                     const p = data.plugins[i];
-                    const iconHtml = '<div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600/20 to-fuchsia-500/20 flex items-center justify-center flex-shrink-0"><img src="' + p.icon + '" class="w-10 h-10 rounded-xl object-cover" alt="' + p.name + '" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'<i class=\\\\\'fa-solid fa-puzzle-piece text-purple-400 text-lg\\\\\'></i>\'"></div>';
+                    const iconHtml = '<div class="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center flex-shrink-0"><img src="' + p.icon + '" class="w-10 h-10 rounded-xl object-cover" alt="' + p.name + '" onerror="fallbackIconSimple(this)"></div>';
                     html += '<div class="essential-card glass-card rounded-xl p-4 relative overflow-hidden" data-id="' + p.id + '">' +
                         '<div class="flex flex-col items-center text-center gap-2 mb-3">' +
                             iconHtml +
@@ -2757,18 +3414,183 @@
         }
 
         // ================================================================
+        // PLAYERS LOGIC
+        // ================================================================
+
+        function sendCommand(cmd) {
+            socket.emit('command', cmd);
+        }
+
+        function renderPlayerCard(p) {
+            var joined = p.joinedAt ? new Date(p.joinedAt).toLocaleTimeString() : 'Unknown';
+            var locHtml = '';
+            if (p.location && p.location.x !== undefined) {
+                locHtml = '<div class="text-emerald-400/80 text-xs font-mono mt-1">' +
+                    '<i class="fa-solid fa-location-dot text-emerald-500 mr-1"></i>' +
+                    Math.round(p.location.x) + ', ' + Math.round(p.location.y) + ', ' + Math.round(p.location.z) +
+                '</div>';
+            } else {
+                locHtml = '<div class="text-zinc-700 text-xs mt-1 locate-pending" data-player="' + p.name + '">' +
+                    '<i class="fa-solid fa-compass mr-1"></i>Unknown' +
+                '</div>';
+            }
+            return '<div class="player-card bg-zinc-900/60 border border-zinc-800/40 rounded-xl p-4 hover:border-purple-500/30 transition" data-player="' + p.name + '">' +
+                '<div class="flex items-start justify-between">' +
+                    '<div class="flex items-center gap-3 min-w-0">' +
+                        '<div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style="background: linear-gradient(135deg, #7c3aed, #ff00ff);">' + p.name.charAt(0).toUpperCase() + '</div>' +
+                        '<div class="min-w-0">' +
+                            '<div class="text-zinc-200 font-semibold text-sm truncate">' + p.name + '</div>' +
+                            '<div class="text-zinc-600 text-xs">Joined ' + joined + '</div>' +
+                            locHtml +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="flex items-center gap-1 flex-shrink-0 ml-2">' +
+                        '<button onclick="locatePlayer(\'' + p.name + '\')" class="text-cyan-500 hover:text-cyan-400 text-xs px-2 py-1.5 rounded-lg hover:bg-cyan-500/10 transition" title="Locate">' +
+                            '<i class="fa-solid fa-compass"></i>' +
+                        '</button>' +
+                        '<button onclick="kickPlayer(\'' + p.name + '\')" class="text-red-500 hover:text-red-400 text-xs px-2 py-1.5 rounded-lg hover:bg-red-500/10 transition" title="Kick">' +
+                            '<i class="fa-solid fa-user-slash"></i>' +
+                        '</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        function loadPlayers() {
+            const listEl = document.getElementById('players-list');
+            const countEl = document.getElementById('players-count');
+            const badgeEl = document.getElementById('players-count-badge');
+
+            fetch('/api/players')
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    if (!data.success || !data.players || data.players.length === 0) {
+                        listEl.innerHTML = '<div class="text-zinc-700 text-sm py-8 text-center">No players online.</div>';
+                        countEl.textContent = '0';
+                        if (badgeEl) { badgeEl.textContent = '0'; badgeEl.classList.add('hidden'); }
+                        return;
+                    }
+
+                    countEl.textContent = data.players.length;
+                    if (badgeEl) { badgeEl.textContent = data.players.length; badgeEl.classList.remove('hidden'); }
+
+                    var html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
+                    for (var i = 0; i < data.players.length; i++) {
+                        html += renderPlayerCard(data.players[i]);
+                    }
+                    html += '</div>';
+                    listEl.innerHTML = html;
+
+                    // Auto-locate all players on load
+                    for (var i = 0; i < data.players.length; i++) {
+                        setTimeout(function(name) {
+                            locatePlayer(name);
+                        }, i * 800, data.players[i].name);
+                    }
+                })
+                .catch(function() {
+                    listEl.innerHTML = '<div class="text-zinc-700 text-sm py-8 text-center">Failed to load players.</div>';
+                });
+        }
+
+        function refreshPlayers() {
+            loadPlayers();
+        }
+
+        function kickPlayer(name) {
+            if (!confirm('Kick "' + name + '" from the server?')) return;
+            sendCommand('kick ' + name);
+        }
+
+        function locatePlayer(name) {
+            // Update button to show loading
+            var card = document.querySelector('.player-card[data-player="' + name + '"]');
+            if (card) {
+                var locEl = card.querySelector('.locate-pending, [class*="text-emerald"]');
+                if (locEl) {
+                    locEl.innerHTML = '<i class="fa-solid fa-circle-notch spinner mr-1"></i>Locating...';
+                    locEl.className = 'text-cyan-400/80 text-xs mt-1';
+                }
+            }
+            socket.emit('locate-player', name);
+        }
+
+        function sendPlayerCommand() {
+            var input = document.getElementById('players-command-input');
+            var cmd = input.value.trim();
+            if (!cmd) return;
+
+            var feedback = document.getElementById('players-command-feedback');
+            sendCommand(cmd);
+            feedback.textContent = '> ' + cmd;
+            feedback.classList.remove('hidden');
+            input.value = '';
+
+            setTimeout(function() { feedback.classList.add('hidden'); }, 3000);
+        }
+
+        // Listen for real-time player updates from Socket.io
+        socket.on('players', function(players) {
+            var listEl = document.getElementById('players-list');
+            var countEl = document.getElementById('players-count');
+            var badgeEl = document.getElementById('players-count-badge');
+            if (!listEl || !countEl) return;
+
+            if (!players || players.length === 0) {
+                listEl.innerHTML = '<div class="text-zinc-700 text-sm py-8 text-center">No players online.</div>';
+                countEl.textContent = '0';
+                if (badgeEl) { badgeEl.textContent = '0'; badgeEl.classList.add('hidden'); }
+                return;
+            }
+
+            countEl.textContent = players.length;
+            if (badgeEl) { badgeEl.textContent = players.length; badgeEl.classList.remove('hidden'); }
+
+            var html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
+            for (var i = 0; i < players.length; i++) {
+                html += renderPlayerCard(players[i]);
+            }
+            html += '</div>';
+            listEl.innerHTML = html;
+        });
+
+        // Listen for live player location updates
+        socket.on('player-location', function(data) {
+            if (!data || !data.name || !data.location) return;
+            var card = document.querySelector('.player-card[data-player="' + data.name + '"]');
+            if (!card) return;
+            var locEl = card.querySelector('[class*="text-cyan"], [class*="text-emerald"], .locate-pending');
+            if (!locEl) return;
+            locEl.innerHTML = '<i class="fa-solid fa-location-dot text-emerald-500 mr-1"></i>' +
+                Math.round(data.location.x) + ', ' + Math.round(data.location.y) + ', ' + Math.round(data.location.z);
+            locEl.className = 'text-emerald-400/80 text-xs mt-1';
+            // brief pulse effect
+            locEl.style.transition = 'none';
+            locEl.style.color = '#6ee7b7';
+            setTimeout(function() { locEl.style.color = ''; }, 300);
+        });
+
+        // ================================================================
         // SETTINGS LOGIC
         // ================================================================
+        function collectSettings() {
+            const keys = ['autoResource','maxRam','javaPath','javaArgs','serverVersion','serverPort','panelPort','autoRestart','autoStart','backupEnabled','backupInterval','backupMaxKeep','backupWorlds','consoleMaxLines','maxPlayers','motd','difficulty','gamemode','pvp','onlineMode','whitelist','viewDistance','spawnProtection'];
+            const payload = {};
+            for (const key of keys) {
+                const val = settingsVal('setting-' + key);
+                if (val !== undefined) payload[key] = val;
+            }
+            return payload;
+        }
+
         async function saveSettings() {
-            const maxRam = document.getElementById('setting-ram').value;
-            const javaPath = document.getElementById('setting-java').value;
             const successEl = document.getElementById('settings-success');
 
             try {
                 const res = await fetch('/api/settings/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ maxRam: maxRam, javaPath: javaPath })
+                    body: JSON.stringify(collectSettings())
                 });
                 const data = await res.json();
 
@@ -3060,9 +3882,9 @@
                 pollCount++;
 
                 const timeText = document.getElementById('update-reload-countdown');
-                const remaining = Math.max(0, 4 - Math.floor(pollCount / 3));
+                const totalSec = Math.round((MAX_POLLS - pollCount) * 1.5);
                 if (timeText) {
-                    timeText.textContent = 'Reloading in ' + remaining + 's...';
+                    timeText.textContent = 'Reloading in ' + Math.max(0, totalSec) + 's...';
                 }
 
                 try {
@@ -3230,11 +4052,43 @@
         // ================================================================
         // WINDOW INITIALIZATION
         // ================================================================
+        // ── Spawn floating ambient particles ──
+        function spawnParticles() {
+            var container = document.getElementById('ambient-particles');
+            if (!container) return;
+            var colors = ['rgba(157,78,221,0.3)', 'rgba(181,23,158,0.2)', 'rgba(124,58,237,0.25)'];
+            for (var i = 0; i < 12; i++) {
+                var dot = document.createElement('div');
+                dot.className = 'particle-dot';
+                var size = 2 + Math.random() * 4;
+                dot.style.width = size + 'px';
+                dot.style.height = size + 'px';
+                dot.style.left = Math.random() * 100 + '%';
+                dot.style.top = Math.random() * 100 + '%';
+                dot.style.background = colors[Math.floor(Math.random() * colors.length)];
+                dot.style.setProperty('--dx', (Math.random() * 200 - 100) + 'px');
+                dot.style.setProperty('--dy', (Math.random() * 200 - 100) + 'px');
+                dot.style.setProperty('--duration', (10 + Math.random() * 15) + 's');
+                dot.style.animationDelay = (Math.random() * 10) + 's';
+                container.appendChild(dot);
+            }
+        }
+
         window.addEventListener('load', function() {
+            spawnParticles();
             loadNetworkInfo();
             loadStatus();
+            loadCrashLog();
             showView('dashboard');
             setInterval(loadStatus, 3000);
+
+            document.getElementById('setting-autoResource')?.addEventListener('change', function() {
+                toggleResourceMode();
+                if (!this.checked) {
+                    document.getElementById('resource-info')?.classList.add('hidden');
+                    document.getElementById('setting-ram').disabled = false;
+                }
+            });
         });
     </script>
 </body>

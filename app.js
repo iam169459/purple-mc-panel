@@ -34,6 +34,7 @@ const JAR_PATH = path.join(SERVER_DIR, 'server.jar');
 const EULA_PATH = path.join(SERVER_DIR, 'eula.txt');
 const SERVER_PROPS_PATH = path.join(SERVER_DIR, 'server.properties');
 const UPDATE_SCRIPT = path.join(ROOT_DIR, 'update.sh');
+const CRASH_LOG_PATH = path.join(CONFIG_DIR, 'crash.log');
 
 const PORT = process.env.PORT || 3000;
 const PAPER_VERSIONS = {
@@ -43,6 +44,31 @@ const PAPER_VERSIONS = {
 };
 const DEFAULT_VERSION = '1.20.4';
 const DEFAULT_RAM = '2G';
+const DEFAULT_SETTINGS = {
+    autoResource: true,
+    maxRam: '2G',
+    javaPath: 'java',
+    javaArgs: '-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 -XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1 -Dusing.aikars.flags=https://mcflags.emc.gs -Daikars.new.flags=true',
+    serverVersion: '1.20.4',
+    serverPort: 25565,
+    autoRestart: true,
+    autoStart: false,
+    panelPort: 3000,
+    backupEnabled: false,
+    backupInterval: 24,
+    backupMaxKeep: 7,
+    backupWorlds: 'world',
+    consoleMaxLines: 500,
+    maxPlayers: 20,
+    motd: 'A PurpleMC Server',
+    difficulty: 'easy',
+    gamemode: 'survival',
+    pvp: true,
+    onlineMode: true,
+    whitelist: false,
+    viewDistance: 10,
+    spawnProtection: 16
+};
 
 const GIT_REMOTE_URL = 'https://github.com/iam169459/purple-mc-panel.git';
 
@@ -67,7 +93,7 @@ const io = new Server(server);
 // so they immediately see historical context before live data starts.
 // ================================================================
 
-const LOG_BUFFER_MAX = 500;
+let logBufferMax = 500;
 const logBuffer = [];
 
 function pushToLogBuffer(rawChunk, type) {
@@ -80,6 +106,8 @@ function pushToLogBuffer(rawChunk, type) {
 
         if (trimmed === '' && lineText === '') continue;
 
+        parsePlayerEvents(lineText);
+
         const entry = {
             raw: lineText,
             text: stripAnsi(lineText),
@@ -89,14 +117,16 @@ function pushToLogBuffer(rawChunk, type) {
 
         logBuffer.push(entry);
 
-        if (logBuffer.length > LOG_BUFFER_MAX) {
+        const s = loadSettings();
+        const maxLines = Math.max(100, Math.min(5000, s.consoleMaxLines || 500));
+        if (logBuffer.length > maxLines) {
             logBuffer.shift();
         }
     }
 }
 
 function stripAnsi(str) {
-    return str.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
+    return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1B\][0-9;]*[a-zA-Z]/g, '');
 }
 
 function classifyLine(line) {
@@ -104,9 +134,20 @@ function classifyLine(line) {
     if (lower.includes('[error]') || lower.includes('exception') || lower.includes('fatal') || lower.includes('[fatal]')) return 'error';
     if (lower.includes('[warn]') || lower.includes('[warning]')) return 'warn';
     if (lower.includes('[info]')) return 'info';
-    if (lower.includes(' done') || lower.includes('complete') || lower.includes('success') || lower.includes('started')) return 'success';
+    if (lower.includes(' done (') || lower.includes('done in ')) return 'success';
+    if (lower.includes('complete') || lower.includes('success')) return 'success';
     if (lower.includes('system') || lower.includes('[system]')) return 'system';
     if (lower.startsWith('$')) return 'command';
+    if (lower.includes('joined the game')) return 'join';
+    if (lower.includes('left the game')) return 'leave';
+    if (lower.includes('logged in')) return 'join';
+    if (lower.includes('logged out')) return 'leave';
+    if (lower.includes('was slain by') || lower.includes('was shot by') || lower.includes('was killed') || lower.includes('drowned') || lower.includes('fell from') || lower.includes('blew up') || lower.includes('hit the ground') || lower.includes('went up in flames') || lower.includes('burned to death') || lower.includes('was burned') || lower.includes('was struck by lightning') || lower.includes('was pricked to death') || lower.includes('suffocated') || lower.includes('starved') || lower.includes('was poked') || lower.includes('died')) return 'death';
+    if (lower.includes('has made the advancement') || lower.includes('has completed the challenge') || lower.includes('has reached the goal')) return 'advancement';
+    if (lower.includes('<') && (lower.includes('>') || lower.includes('»'))) return 'chat';
+    if (lower.includes('mspt') || lower.includes('tps:') || lower.includes('memory:') || lower.includes('tick:')) return 'tick';
+    if (lower.includes('[debug]') || lower.includes('[fine]') || lower.includes('[finer]') || lower.includes('[finest]')) return 'debug';
+    if (lower.includes('started') || lower.includes('running on') || lower.includes('preparing spawn') || lower.includes('loading world') || lower.includes('loaded world') || lower.includes('default game type') || lower.includes('setting spawn')) return 'success';
     return 'default';
 }
 
@@ -122,6 +163,66 @@ let serverStartTime = null;
 let restartPending = false;
 
 let isUpdateRunning = false;
+
+// Player tracking
+let onlinePlayers = [];
+let playerLocations = {};
+
+function parsePlayerEvents(text) {
+    const clean = stripAnsi(text).trim();
+    // Join: "Steve joined the game"
+    const joinMatch = clean.match(/^(\w{3,16}) joined the game$/);
+    if (joinMatch) {
+        const name = joinMatch[1];
+        if (!onlinePlayers.find(p => p.name === name)) {
+            onlinePlayers.push({ name, joinedAt: new Date().toISOString() });
+            io.emit('players', onlinePlayers);
+            log(`Player joined: ${name}`, 'info');
+        }
+        return;
+    }
+    // Leave: "Steve left the game"
+    const leaveMatch = clean.match(/^(\w{3,16}) left the game$/);
+    if (leaveMatch) {
+        const name = leaveMatch[1];
+        onlinePlayers = onlinePlayers.filter(p => p.name !== name);
+        delete playerLocations[name];
+        io.emit('players', onlinePlayers);
+        log(`Player left: ${name}`, 'info');
+        return;
+    }
+    // Parse /list output: "There are X of Y players online: player1, player2, ..."
+    const listMatch = clean.match(/^There are (\d+) of a max of \d+ players online:\s*(.*)$/);
+    if (listMatch) {
+        const names = listMatch[2] ? listMatch[2].split(',').map(n => n.trim()).filter(Boolean) : [];
+        onlinePlayers = names.map(name => {
+            const existing = onlinePlayers.find(p => p.name === name);
+            return existing || { name, joinedAt: new Date().toISOString() };
+        });
+        io.emit('players', onlinePlayers);
+        return;
+    }
+    // Parse /data get entity <player> Pos response: "Steve has the following entity data: [123.456d, 64.0d, 789.012d]"
+    const locMatch = clean.match(/^(\w{3,16}) has the following entity data: \[(-?[\d.]+)d?, (-?[\d.]+)d?, (-?[\d.]+)d?\]/);
+    if (locMatch) {
+        const name = locMatch[1];
+        const coords = {
+            x: parseFloat(locMatch[2]),
+            y: parseFloat(locMatch[3]),
+            z: parseFloat(locMatch[4]),
+            updatedAt: new Date().toISOString()
+        };
+        playerLocations[name] = coords;
+        // Update player entry with location
+        const player = onlinePlayers.find(p => p.name === name);
+        if (player) {
+            player.location = coords;
+            io.emit('players', onlinePlayers);
+            io.emit('player-location', { name, location: coords });
+        }
+        return;
+    }
+}
 
 // ================================================================
 // PHASE 3: VERSION & CONFIGURATION
@@ -168,8 +269,15 @@ function downloadFile(url, dest) {
 
 async function checkAndDownloadServer() {
     if (!fs.existsSync(JAR_PATH)) {
-        log('Server JAR not found. Downloading PaperMC...', 'warn');
-        const url = PAPER_VERSIONS[DEFAULT_VERSION];
+        const settings = loadSettings();
+        let version = settings.serverVersion || DEFAULT_VERSION;
+        log(`Server JAR not found. Downloading PaperMC ${version}...`, 'warn');
+        let url = PAPER_VERSIONS[version];
+        if (!url) {
+            log(`No download URL for version ${version}, falling back to ${DEFAULT_VERSION}`, 'warn');
+            version = DEFAULT_VERSION;
+            url = PAPER_VERSIONS[DEFAULT_VERSION];
+        }
         try {
             await downloadFile(url, JAR_PATH);
             fs.writeFileSync(EULA_PATH, 'eula=true');
@@ -184,6 +292,10 @@ async function checkAndDownloadServer() {
     }
 }
 
+function escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // ================================================================
 // PHASE 4: SERVER PROCESS CONTROL (ENHANCED SPAWN)
 // ================================================================
@@ -191,98 +303,171 @@ async function checkAndDownloadServer() {
 function loadSettings() {
     try {
         if (fs.existsSync(SETTINGS_DB_PATH)) {
-            return JSON.parse(fs.readFileSync(SETTINGS_DB_PATH, 'utf8'));
+            const saved = JSON.parse(fs.readFileSync(SETTINGS_DB_PATH, 'utf8'));
+            return { ...DEFAULT_SETTINGS, ...saved };
         }
     } catch (err) {
         log(`Failed to load settings: ${err.message}`, 'warn');
     }
-    return { maxRam: DEFAULT_RAM, javaPath: 'java' };
+    return { ...DEFAULT_SETTINGS };
+}
+
+let crashCount = 0;
+const CRASH_THROTTLE_MAX = 5;
+const CRASH_THROTTLE_WINDOW = 120000;
+let crashWindowStart = 0;
+const CRASH_LOG_MAX = 100;
+
+function writeCrashLog(entry) {
+    try {
+        const logs = [];
+        if (fs.existsSync(CRASH_LOG_PATH)) {
+            const raw = fs.readFileSync(CRASH_LOG_PATH, 'utf8').trim();
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) logs.push(...parsed);
+            }
+        }
+        logs.push(entry);
+        while (logs.length > CRASH_LOG_MAX) logs.shift();
+        fs.writeFileSync(CRASH_LOG_PATH, JSON.stringify(logs, null, 2), 'utf8');
+    } catch {}
+}
+
+function diagnoseCrash(code, recentLines) {
+    const combined = recentLines.join('\n').toLowerCase();
+    const diagnosis = { reason: 'unknown', severity: 'warning', repairs: [] };
+
+    if (code === null || code === undefined) {
+        diagnosis.reason = 'process_killed';
+        diagnosis.severity = 'info';
+    } else if (code === 137 || code === 143) {
+        diagnosis.reason = 'out_of_memory';
+        diagnosis.severity = 'critical';
+        diagnosis.repairs.push({ action: 'reduce_ram', label: 'Reduce max RAM or check for memory leaks', auto: false });
+    } else if (code === 1 && combined.includes('outofmemory')) {
+        diagnosis.reason = 'out_of_memory';
+        diagnosis.severity = 'critical';
+        diagnosis.repairs.push({ action: 'reduce_ram', label: 'Reduce max RAM or check for memory leaks', auto: false });
+    } else if (combined.includes('unable to load') && (combined.includes('world') || combined.includes('level'))) {
+        diagnosis.reason = 'world_corruption';
+        diagnosis.severity = 'critical';
+        diagnosis.repairs.push({ action: 'backup_world', label: 'World data may be corrupted — restore from backup', auto: false });
+    } else if (combined.includes('error loading plugin') || combined.includes('plugins')) {
+        diagnosis.reason = 'plugin_failure';
+        diagnosis.severity = 'high';
+        diagnosis.repairs.push({ action: 'disable_plugins', label: 'A plugin failed to load — remove recently added plugins', auto: false });
+    } else if (combined.includes('java.lang.nosuchmethod') || combined.includes('classcastexception')) {
+        diagnosis.reason = 'plugin_incompatibility';
+        diagnosis.severity = 'high';
+        diagnosis.repairs.push({ action: 'update_plugins', label: 'Plugin incompatibility detected — update all plugins', auto: false });
+    } else if (combined.includes('bindException') || combined.includes('address already in use')) {
+        diagnosis.reason = 'port_conflict';
+        diagnosis.severity = 'high';
+        diagnosis.repairs.push({ action: 'change_port', label: 'Port already in use — change server-port in settings', auto: false });
+    } else if (code === 1) {
+        diagnosis.reason = 'generic_error';
+        diagnosis.severity = 'warning';
+        diagnosis.repairs.push({ action: 'check_logs', label: 'Check console output above for error details', auto: false });
+    }
+
+    return diagnosis;
+}
+
+function captureCrashSnapshot(code) {
+    const recentLines = logBuffer.slice(-50).map(e => e.text);
+    const diagnosis = diagnoseCrash(code, recentLines);
+    const snapshot = {
+        timestamp: new Date().toISOString(),
+        exitCode: code,
+        reason: diagnosis.reason,
+        severity: diagnosis.severity,
+        repairs: diagnosis.repairs,
+        recentOutput: recentLines.slice(-20)
+    };
+
+    writeCrashLog(snapshot);
+    log(`Crash logged: ${diagnosis.reason} (code: ${code}, severity: ${diagnosis.severity})`, diagnosis.severity === 'critical' ? 'error' : 'warn');
+    return snapshot;
 }
 
 async function startServer() {
-    if (mcProcess || isStarting) {
-        return { success: false, error: 'Server already running or starting' };
+    if (mcProcess || isStarting || isStopping) {
+        return { success: false, error: 'Server already running, starting, or stopping' };
     }
     isStarting = true;
-    io.emit('console', `\n${COLORS.cyan}[SYSTEM]${COLORS.reset} Starting Minecraft server...\n`);
+    emitConsoleSafe(`\n${COLORS.cyan}[SYSTEM]${COLORS.reset} Starting Minecraft server...\n`);
 
     try {
-        await checkAndDownloadServer();
         const settings = loadSettings();
-        const ram = settings.maxRam || DEFAULT_RAM;
+        await checkAndDownloadServer(settings);
+        const ram = settings.autoResource ? calculateRecommendedRam() : (settings.maxRam || DEFAULT_RAM);
         const javaExe = settings.javaPath || 'java';
 
-        const javaFallbacks = [];
-        if (javaExe !== 'java') {
-            javaFallbacks.push(javaExe);
-        }
-        javaFallbacks.push('java');
-        javaFallbacks.push('/usr/bin/java');
-        javaFallbacks.push('/usr/local/bin/java');
-        javaFallbacks.push('/opt/java/bin/java');
+        const javaFallbacks = [...new Set([javaExe, 'java', '/usr/bin/java', '/usr/local/bin/java', '/opt/java/bin/java'].filter(Boolean))];
 
         let spawned = false;
         let lastError = null;
+        let spawnedProcess = null;
 
         for (const javaPathCandidate of javaFallbacks) {
             try {
-                mcProcess = spawn(javaPathCandidate, ['-Xmx' + ram, '-Xms' + ram, '-jar', 'server.jar', 'nogui'], {
+                const extraArgs = settings.javaArgs ? settings.javaArgs.split(' ').filter(Boolean) : [];
+                const proc = spawn(javaPathCandidate, ['-Xmx' + ram, '-Xms' + ram, ...extraArgs, '-jar', 'server.jar', 'nogui'], {
                     cwd: SERVER_DIR,
                     stdio: ['pipe', 'pipe', 'pipe'],
                     detached: false
                 });
 
-                const testResult = await new Promise((resolve) => {
-                    const timeout = setTimeout(() => resolve({ ok: true }), 100);
-                    mcProcess.on('error', (err) => {
-                        clearTimeout(timeout);
-                        resolve({ ok: false, err });
-                    });
-                    mcProcess.on('spawn', () => {
-                        clearTimeout(timeout);
-                        resolve({ ok: true });
-                    });
-                });
+                const testResult = await Promise.race([
+                    new Promise((resolve) => proc.on('spawn', () => resolve({ ok: true }))),
+                    new Promise((resolve) => proc.on('error', (err) => resolve({ ok: false, err }))),
+                    new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 500))
+                ]);
 
-                if (!testResult.ok && testResult.err) {
-                    mcProcess = null;
+                if (testResult.ok === false) {
+                    proc.kill();
                     lastError = testResult.err;
                     continue;
                 }
 
+                spawnedProcess = proc;
                 spawned = true;
                 log(`Server spawn using: ${javaPathCandidate}`, 'info');
                 break;
             } catch (spawnErr) {
-                mcProcess = null;
                 lastError = spawnErr;
                 continue;
             }
         }
 
-        if (!spawned || !mcProcess) {
+        if (!spawned || !spawnedProcess) {
             isStarting = false;
             const msg = `Failed to spawn Java process. Tried: ${javaFallbacks.join(', ')}. Last error: ${lastError?.message || 'unknown'}`;
             log(msg, 'error');
-            io.emit('console', `\n${COLORS.red}[SYSTEM ERROR]${COLORS.reset} ${msg}\n`);
+            emitConsoleSafe(`\n${COLORS.red}[SYSTEM ERROR]${COLORS.reset} ${msg}\n`);
             return { success: false, error: msg };
         }
 
+        mcProcess = spawnedProcess;
         processPid = mcProcess.pid;
         serverStartTime = Date.now();
         isStarting = false;
+        crashCount = 0;
         log(`Server started with PID: ${processPid}`, 'info');
         io.emit('status', 'online');
         pushToLogBuffer(`[SYSTEM] Minecraft server started (PID: ${processPid})`, 'system');
 
         mcProcess.stdout.on('data', (chunk) => {
-            pushToLogBuffer(chunk, 'stdout');
-            io.emit('console', chunk.toString());
+            const text = stripAnsi(chunk.toString());
+            pushToLogBuffer(text, 'stdout');
+            io.emit('console', text);
         });
 
         mcProcess.stderr.on('data', (chunk) => {
-            pushToLogBuffer(chunk, 'stderr');
-            io.emit('console', `\x1b[31m[ERROR]\x1b[0m ${chunk}`);
+            const text = stripAnsi(chunk.toString());
+            pushToLogBuffer(`[STDERR] ${text}`, 'stderr');
+            io.emit('console', `\n${COLORS.red}[ERROR]${COLORS.reset} ${text}`);
         });
 
         mcProcess.on('close', (code) => {
@@ -290,8 +475,10 @@ async function startServer() {
             mcProcess = null;
             processPid = null;
             serverStartTime = null;
+            onlinePlayers = [];
             io.emit('status', 'offline');
             io.emit('players', []);
+            isStopping = false;
 
             pushToLogBuffer(`[SYSTEM] Minecraft server stopped (exit code: ${code})`, 'system');
 
@@ -299,15 +486,48 @@ async function startServer() {
                 restartPending = false;
                 log('Restart pending, starting server...', 'warn');
                 setTimeout(() => startServer(), 2000);
-            } else if (wasRunning) {
-                io.emit('console', `\n${COLORS.yellow}[SYSTEM]${COLORS.reset} Server stopped (code: ${code})\n`);
+                return;
+            }
+
+            if (wasRunning && code !== 0) {
+                const crashInfo = captureCrashSnapshot(code);
+                const crashMsg = crashInfo.reason === 'out_of_memory'
+                    ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}Out of memory detected!${COLORS.reset} Try reducing max RAM or adding more swap.`
+                    : crashInfo.reason === 'world_corruption'
+                    ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}World corruption detected!${COLORS.reset} Restore from backup or run world repair.`
+                    : crashInfo.reason === 'plugin_failure'
+                    ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}Plugin failure detected!${COLORS.reset} Remove recently added plugins and restart.`
+                    : `${COLORS.red}[CRASH]${COLORS.reset} Server exited with code ${code}`;
+
+                emitConsoleSafe(`\n${crashMsg}\n`);
+
+                const s = loadSettings();
+                if (s.autoRestart) {
+                    const now = Date.now();
+                    if (now - crashWindowStart > CRASH_THROTTLE_WINDOW) {
+                        crashWindowStart = now;
+                        crashCount = 0;
+                    }
+                    crashCount++;
+                    const delay = Math.min(30, crashCount * 5);
+                    emitConsoleSafe(`\n${COLORS.yellow}[SYSTEM]${COLORS.reset} Auto-restart in ${delay}s (attempt ${crashCount}/${CRASH_THROTTLE_MAX})\n`);
+                    log(`Server crashed (code: ${code}, reason: ${crashInfo.reason}), auto-restart #${crashCount} in ${delay}s`, 'warn');
+                    if (crashCount <= CRASH_THROTTLE_MAX) {
+                        setTimeout(() => startServer(), delay * 1000);
+                    } else {
+                        emitConsoleSafe(`\n${COLORS.red}[SYSTEM]${COLORS.reset} Auto-restart throttled: too many crashes. Manual restart required.\n`);
+                        log('Auto-restart throttled after ' + CRASH_THROTTLE_MAX + ' consecutive crashes', 'error');
+                    }
+                } else {
+                    emitConsoleSafe(`\n${COLORS.yellow}[SYSTEM]${COLORS.reset} Server stopped (code: ${code})\n`);
+                }
             }
         });
 
         mcProcess.on('error', (err) => {
             isStarting = false;
             log(`Process error: ${err.message}`, 'error');
-            io.emit('console', `\n${COLORS.red}[SYSTEM ERROR]${COLORS.reset} ${err.message}\n`);
+            emitConsoleSafe(`\n${COLORS.red}[SYSTEM ERROR]${COLORS.reset} ${err.message}\n`);
             pushToLogBuffer(`[SYSTEM ERROR] ${err.message}`, 'error');
         });
 
@@ -317,6 +537,14 @@ async function startServer() {
         log(`Failed to start: ${err.message}`, 'error');
         return { success: false, error: err.message };
     }
+}
+
+function emitConsoleSafe(msg) {
+    try { io.emit('console', msg); } catch {}
+}
+
+function stripAnsi(str) {
+    return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1B\][0-9;]*[a-zA-Z]/g, '');
 }
 
 function stopServer() {
@@ -396,7 +624,15 @@ async function getProcessStats() {
 // PHASE 5: ADVANCED METRICS ENGINE (CPU, RAM, DISK)
 // ================================================================
 
+let diskCache = null;
+let diskCacheTime = 0;
+const DISK_CACHE_TTL = 30000;
+
 function getDiskUsage(dirPath) {
+    const now = Date.now();
+    if (diskCache && now - diskCacheTime < DISK_CACHE_TTL) {
+        return diskCache;
+    }
     try {
         const stats = fs.statSync(dirPath);
         let totalSize = 0;
@@ -404,7 +640,12 @@ function getDiskUsage(dirPath) {
         let dirCount = 0;
 
         function calculateSize(dir) {
-            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            let entries;
+            try {
+                entries = fs.readdirSync(dir, { withFileTypes: true });
+            } catch {
+                return;
+            }
             for (const entry of entries) {
                 try {
                     const fullPath = path.join(dir, entry.name);
@@ -423,13 +664,16 @@ function getDiskUsage(dirPath) {
 
         calculateSize(dirPath);
 
-        return {
+        const result = {
             totalBytes: totalSize,
             totalMB: Math.round(totalSize / 1024 / 1024 * 100) / 100,
             totalGB: Math.round(totalSize / 1024 / 1024 / 1024 * 100) / 100,
             fileCount,
             dirCount
         };
+        diskCache = result;
+        diskCacheTime = now;
+        return result;
     } catch (err) {
         return { totalBytes: 0, totalMB: 0, totalGB: 0, fileCount: 0, dirCount: 0, error: err.message };
     }
@@ -473,6 +717,17 @@ function getSystemMetrics() {
     }
 }
 
+function calculateRecommendedRam() {
+    try {
+        const totalGB = Math.floor(os.totalmem() / 1024 / 1024 / 1024);
+        if (totalGB <= 1) return '1G';
+        const recommended = Math.max(1, Math.floor(totalGB * 0.75));
+        return recommended + 'G';
+    } catch {
+        return DEFAULT_RAM;
+    }
+}
+
 // ================================================================
 // PHASE 6: MIDDLEWARE
 // ================================================================
@@ -513,14 +768,16 @@ function sendError(res, message, status = 400) {
 app.get('/api/status', async (req, res) => {
     const stats = await getProcessStats();
     const disk = getDiskUsage(SERVER_DIR);
+    const settings = loadSettings();
     res.json({
         running: !!mcProcess,
         pid: processPid,
         uptime: stats.uptime,
         cpu: stats.cpu,
         memory: stats.memory,
-        players: [],
-        disk
+        players: onlinePlayers,
+        disk,
+        allocation: { maxRam: settings.autoResource ? calculateRecommendedRam() : (settings.maxRam || DEFAULT_RAM), autoResource: settings.autoResource }
     });
 });
 
@@ -548,7 +805,11 @@ app.post('/api/command', (req, res) => {
 });
 
 app.get('/api/players', (req, res) => {
-    res.json([]);
+    const playersWithLocation = onlinePlayers.map(p => ({
+        ...p,
+        location: playerLocations[p.name] || null
+    }));
+    res.json({ success: true, count: playersWithLocation.length, players: playersWithLocation });
 });
 
 app.get('/api/server/usage', async (req, res) => {
@@ -569,8 +830,9 @@ app.get('/api/server/usage', async (req, res) => {
             system: sysMetrics,
             disk: diskUsage,
             allocation: {
-                maxRam: settings.maxRam || DEFAULT_RAM,
-                javaPath: settings.javaPath || 'java'
+                maxRam: settings.autoResource ? calculateRecommendedRam() : (settings.maxRam || DEFAULT_RAM),
+                javaPath: settings.javaPath || 'java',
+                autoResource: settings.autoResource
             }
         });
     } catch (err) {
@@ -747,7 +1009,7 @@ app.post('/api/files/create', (req, res) => {
 app.put('/api/files/:path(*)', (req, res) => {
     const { content } = req.body;
     try {
-        const filePath = sanitizePath(SERVER_DIR, req.params.path);
+        const filePath = sanitizePath(SERVER_DIR, decodeURIComponent(req.params.path));
         if (!fs.existsSync(filePath)) return sendError(res, 'File not found', 404);
         if (fs.statSync(filePath).isDirectory()) return sendError(res, 'Cannot write to directory', 400);
 
@@ -766,7 +1028,7 @@ app.put('/api/files/:path(*)', (req, res) => {
 
 app.delete('/api/files/:path(*)', (req, res) => {
     try {
-        const filePath = sanitizePath(SERVER_DIR, req.params.path);
+        const filePath = sanitizePath(SERVER_DIR, decodeURIComponent(req.params.path));
         if (!fs.existsSync(filePath)) return sendError(res, 'Not found', 404);
         if (fs.statSync(filePath).isDirectory()) {
             fs.rmSync(filePath, { recursive: true, force: true });
@@ -919,9 +1181,10 @@ app.post('/api/server/properties/update', (req, res) => {
 function checkPort(port) {
     return new Promise((resolve) => {
         const srv = net.createServer();
-        srv.once('error', () => resolve(false));
-        srv.once('listening', () => { srv.close(); resolve(true); });
-        srv.listen(port);
+        const timeout = setTimeout(() => { srv.close(); resolve(false); }, 3000);
+        srv.once('error', () => { clearTimeout(timeout); resolve(false); });
+        srv.once('listening', () => { clearTimeout(timeout); srv.close(); resolve(true); });
+        srv.listen(port, '0.0.0.0');
     });
 }
 
@@ -1110,7 +1373,7 @@ app.get('/api/plugins/search', async (req, res) => {
                 query: q.trim(),
                 offset: (pageNum - 1) * maxResults,
                 limit: maxResults,
-                facets: JSON.stringify([['project_type:mod']])
+                facets: JSON.stringify([['project_type:plugin']])
             },
             timeout: 10000,
             headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
@@ -1122,17 +1385,23 @@ app.get('/api/plugins/search', async (req, res) => {
             const versionPromises = hits.map(async (p) => {
                 try {
                     const vRes = await axios.get(`${MODRINTH_API}/project/${p.project_id}/version`, {
+                        params: { loaders: JSON.stringify(['paper', 'purpur', 'spigot', 'bukkit']) },
                         timeout: 5000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
                     });
-                    const latest = vRes.data && vRes.data[0];
+                    const versions = vRes.data || [];
+                    // Find first Paper-compatible version with a download
+                    let found = null;
+                    for (const v of versions) {
+                        if (v.files && v.files[0] && v.files[0].url) { found = v; break; }
+                    }
                     return {
                         id: p.project_id, name: p.title || 'Unknown', tag: p.slug || '',
                         description: p.description ? p.description.substring(0, 200) : '',
                         icon: p.icon_url || null, downloads: p.downloads || 0,
                         likes: 0, premium: false, price: 0,
-                        version: latest ? latest.version_number : 'N/A',
+                        version: found ? found.version_number : 'N/A',
                         author: p.author || 'Unknown', source: 'modrinth',
-                        downloadUrl: latest && latest.files && latest.files[0] ? latest.files[0].url : null
+                        downloadUrl: found ? found.files[0].url : null
                     };
                 } catch { return null; }
             });
@@ -1209,15 +1478,37 @@ app.post('/api/plugins/install', async (req, res) => {
         // Resolve download URL from the appropriate source
         if (source === 'modrinth') {
             const vRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
+                params: { loaders: JSON.stringify(['paper', 'purpur', 'spigot', 'bukkit']) },
                 timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
             });
-            const versions = vRes.data;
-            if (!versions || !versions[0] || !versions[0].files || !versions[0].files[0]) {
-                emitProgress('error', 0, 'No downloadable file found for this plugin');
-                return sendError(res, 'No downloadable file found for this plugin version', 404);
+            let versions = vRes.data;
+            if (!versions || versions.length === 0) {
+                // Fallback: try without loader filter
+                const fallbackRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
+                    timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
+                });
+                versions = fallbackRes.data;
             }
-            downloadUrl = versions[0].files[0].url;
-            suggestedName = versions[0].files[0].filename || suggestedName;
+            // Find first version with a downloadable file, preferring Paper-compatible loaders
+            let best = null;
+            const serverSettings = loadSettings();
+            const targetVer = serverSettings.serverVersion || '';
+            for (const v of versions) {
+                if (!v.files || !v.files[0] || !v.files[0].url) continue;
+                const loaders = (v.loaders || []).map(l => l.toLowerCase());
+                const isPlugin = loaders.some(l => ['paper', 'purpur', 'spigot', 'bukkit'].includes(l));
+                if (!isPlugin) continue;
+                const gameVer = (v.game_versions || [])[0] || '';
+                // Prefer exact version match, then any Paper-compatible
+                if (targetVer && gameVer === targetVer) { best = v; break; }
+                if (!best) best = v;
+            }
+            if (!best) {
+                emitProgress('error', 0, 'No Paper-compatible plugin version found');
+                return sendError(res, 'No Paper-compatible version found for this plugin', 404);
+            }
+            downloadUrl = best.files[0].url;
+            suggestedName = best.files[0].filename || suggestedName;
         } else if (source === 'spigot') {
             const infoRes = await axios.get(`${SPIGET_API}/resources/${resourceId}?fields=id,name`, {
                 timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
@@ -1325,13 +1616,17 @@ app.delete('/api/plugins/:name', (req, res) => {
     if (!name.endsWith('.jar') || !/^[a-zA-Z0-9._ -]+$/.test(name)) {
         return sendError(res, 'Invalid plugin name');
     }
-    const pluginPath = path.join(SERVER_DIR, 'plugins', name);
-    if (fs.existsSync(pluginPath)) {
-        fs.unlinkSync(pluginPath);
-        log(`Plugin deleted: ${name}`, 'info');
-        res.json({ success: true });
-    } else {
-        res.json({ error: 'Not found' });
+    try {
+        const pluginPath = path.join(SERVER_DIR, 'plugins', name);
+        if (fs.existsSync(pluginPath)) {
+            fs.unlinkSync(pluginPath);
+            log(`Plugin deleted: ${name}`, 'info');
+            res.json({ success: true });
+        } else {
+            res.json({ error: 'Not found' });
+        }
+    } catch (err) {
+        sendError(res, 'Failed to delete plugin');
     }
 });
 
@@ -1355,15 +1650,59 @@ app.get('/api/settings', (req, res) => {
     res.json({ success: true, settings });
 });
 
-app.post('/api/settings/save', (req, res) => {
-    const { maxRam, javaPath } = req.body;
-    const current = loadSettings();
+const SETTINGS_TO_PROPS = {
+    motd: 'motd',
+    maxPlayers: 'max-players',
+    difficulty: 'difficulty',
+    gamemode: 'gamemode',
+    pvp: 'pvp',
+    onlineMode: 'online-mode',
+    whitelist: 'white-list',
+    viewDistance: 'view-distance',
+    spawnProtection: 'spawn-protection',
+    serverPort: 'server-port'
+};
 
-    if (maxRam) current.maxRam = maxRam;
-    if (javaPath) current.javaPath = javaPath;
+app.post('/api/settings/save', (req, res) => {
+    const current = loadSettings();
+    const allowedKeys = Object.keys(DEFAULT_SETTINGS);
+    let changed = [];
+
+    for (const key of allowedKeys) {
+        if (req.body[key] !== undefined) {
+            current[key] = req.body[key];
+            changed.push(key);
+        }
+    }
 
     if (saveSettings(current)) {
-        log(`Settings saved: maxRam=${current.maxRam} javaPath=${current.javaPath}`, 'info');
+        // Sync compatible settings to server.properties
+        try {
+            if (fs.existsSync(SERVER_PROPS_PATH)) {
+                let propsContent = fs.readFileSync(SERVER_PROPS_PATH, 'utf8');
+                let propsModified = false;
+                for (const [key, propKey] of Object.entries(SETTINGS_TO_PROPS)) {
+                    if (req.body[key] !== undefined && changed.includes(key)) {
+                        const val = String(req.body[key]);
+                        const re = new RegExp(`^${escapeRegex(propKey)}=.*$`, 'm');
+                        if (re.test(propsContent)) {
+                            propsContent = propsContent.replace(re, `${propKey}=${val}`);
+                        } else {
+                            propsContent += `\n${propKey}=${val}`;
+                        }
+                        propsModified = true;
+                    }
+                }
+                if (propsModified) {
+                    fs.writeFileSync(SERVER_PROPS_PATH, propsContent, 'utf8');
+                    log('server.properties synced from settings', 'info');
+                }
+            }
+        } catch (propsErr) {
+            log(`Failed to sync server.properties: ${propsErr.message}`, 'warn');
+        }
+
+        log(`Settings saved: ${changed.join(', ')}`, 'info');
         res.json({ success: true, settings: current });
     } else {
         res.status(500).json({ success: false, error: 'Failed to save settings' });
@@ -1393,12 +1732,16 @@ app.get('/api/backups', (req, res) => {
 app.post('/api/backups/create', (req, res) => {
     const backupName = `backup-${Date.now()}.zip`;
     const backupPath = path.join(BACKUPS_DIR, backupName);
+    const s = loadSettings();
+    const worlds = (s.backupWorlds || 'world').split(',').map(w => w.trim()).filter(Boolean);
+    const args = ['-r', backupPath, ...worlds, 'plugins', 'server.properties'];
 
-    spawn('zip', ['-r', backupPath, 'world', 'world_nether', 'world_the_end', 'plugins', 'server.properties'], {
+    spawn('zip', args, {
         cwd: SERVER_DIR,
         stdio: 'ignore'
     }).on('close', (code) => {
         if (code === 0) {
+            checkScheduledBackups(); // Prune excess after creation
             res.json({ success: true, name: backupName });
         } else {
             sendError(res, 'Backup failed', 500);
@@ -1408,12 +1751,50 @@ app.post('/api/backups/create', (req, res) => {
 
 app.delete('/api/backups/:name', (req, res) => {
     const name = req.params.name;
-    const backupPath = path.join(BACKUPS_DIR, name);
-    if (fs.existsSync(backupPath)) {
-        fs.unlinkSync(backupPath);
+    if (!/^[a-zA-Z0-9._-]+\.zip$/.test(name)) {
+        return sendError(res, 'Invalid backup name');
+    }
+    const backupPath = path.resolve(BACKUPS_DIR, name);
+    if (!backupPath.startsWith(path.resolve(BACKUPS_DIR) + path.sep)) {
+        return sendError(res, 'Invalid path');
+    }
+    try {
+        if (fs.existsSync(backupPath)) {
+            fs.unlinkSync(backupPath);
+            res.json({ success: true });
+        } else {
+            res.json({ error: 'Not found' });
+        }
+    } catch (err) {
+        sendError(res, 'Failed to delete backup');
+    }
+});
+
+// ================================================================
+// CRASH LOG API
+// ================================================================
+
+app.get('/api/crash-log', (req, res) => {
+    try {
+        if (fs.existsSync(CRASH_LOG_PATH)) {
+            const raw = fs.readFileSync(CRASH_LOG_PATH, 'utf8').trim();
+            if (raw) {
+                const logs = JSON.parse(raw);
+                return res.json({ success: true, logs: Array.isArray(logs) ? logs : [] });
+            }
+        }
+        res.json({ success: true, logs: [] });
+    } catch (err) {
+        res.json({ success: true, logs: [] });
+    }
+});
+
+app.post('/api/crash-log/clear', (req, res) => {
+    try {
+        fs.writeFileSync(CRASH_LOG_PATH, '[]', 'utf8');
         res.json({ success: true });
-    } else {
-        res.json({ error: 'Not found' });
+    } catch (err) {
+        sendError(res, 'Failed to clear crash log');
     }
 });
 
@@ -1563,7 +1944,7 @@ app.post('/api/update/install', (req, res) => {
 });
 
 // ================================================================
-// PHASE 15: SYSTEM INFO
+// PHASE 15: SYSTEM INFO & RESOURCE DETECTION
 // ================================================================
 
 app.get('/api/system', (req, res) => {
@@ -1572,6 +1953,22 @@ app.get('/api/system', (req, res) => {
         cpu: { cores: os.cpus().length, load: os.loadavg() },
         memory: { total: stats, free: os.freemem(), used: stats - os.freemem() },
         uptime: os.uptime()
+    });
+});
+
+app.get('/api/system/resources', (req, res) => {
+    const metrics = getSystemMetrics();
+    const recommended = calculateRecommendedRam();
+    const settings = loadSettings();
+    res.json({
+        success: true,
+        system: metrics,
+        recommended: { maxRam: recommended },
+        allocation: {
+            mode: settings.autoResource ? 'auto' : 'manual',
+            currentMaxRam: settings.maxRam || DEFAULT_RAM,
+            recommendedMaxRam: recommended
+        }
     });
 });
 
@@ -1615,6 +2012,15 @@ io.on('connection', (socket) => {
         sendCommand(cmd);
     });
 
+    socket.on('locate-player', (playerName) => {
+        if (playerName && typeof playerName === 'string') {
+            log(`Locating player: ${playerName}`, 'info');
+            sendCommand(`data get entity ${playerName} Pos`);
+            // Also send a /list to trigger player list sync
+            sendCommand('list');
+        }
+    });
+
     socket.on('disconnect', () => {
         log(`Client disconnected: ${socket.id}`, 'info');
     });
@@ -1625,6 +2031,12 @@ io.on('connection', (socket) => {
 // ================================================================
 
 setInterval(async () => {
+    const settings = loadSettings();
+    const recommendedRam = calculateRecommendedRam();
+    const maxRam = settings.autoResource ? recommendedRam : (settings.maxRam || DEFAULT_RAM);
+    const clientCount = io?.engine?.clientsCount ?? 0;
+    if (clientCount === 0) return;
+
     if (mcProcess && processPid) {
         try {
             const stats = await pidusage(processPid);
@@ -1634,17 +2046,48 @@ setInterval(async () => {
             io.emit('stats', {
                 cpu: Math.round(stats.cpu),
                 memory: Math.round(stats.memory / 1024 / 1024),
+                uptime: serverStartTime ? Math.floor((Date.now() - serverStartTime) / 1000) : 0,
                 disk: diskUsage,
-                system: sysMetrics
+                system: sysMetrics,
+                allocation: { maxRam, recommended: recommendedRam, autoResource: settings.autoResource }
             });
         } catch {
-            io.emit('stats', { cpu: 0, memory: 0, disk: null, system: null });
+            io.emit('stats', { cpu: 0, memory: 0, uptime: 0, disk: null, system: null, allocation: { maxRam, recommended: recommendedRam, autoResource: settings.autoResource } });
         }
     } else {
         const sysMetrics = getSystemMetrics();
-        io.emit('stats', { cpu: 0, memory: 0, disk: null, system: sysMetrics });
+        io.emit('stats', { cpu: 0, memory: 0, uptime: 0, disk: null, system: sysMetrics, allocation: { maxRam, recommended: recommendedRam, autoResource: settings.autoResource } });
     }
 }, 2000);
+
+// ================================================================
+// SCHEDULED BACKUPS
+// ================================================================
+
+function checkScheduledBackups() {
+    const s = loadSettings();
+    if (!s.backupEnabled) return;
+
+    const intervalMs = (s.backupInterval || 24) * 60 * 60 * 1000;
+    const backupsDir = BACKUPS_DIR;
+    if (!fs.existsSync(backupsDir)) return;
+
+    const files = fs.readdirSync(backupsDir).filter(f => f.endsWith('.zip'));
+    const maxKeep = s.backupMaxKeep || 7;
+
+    // Remove excess backups
+    if (files.length >= maxKeep) {
+        const sorted = files.map(f => ({ name: f, time: fs.statSync(path.join(backupsDir, f)).mtimeMs }))
+            .sort((a, b) => b.time - a.time);
+        while (sorted.length >= maxKeep) {
+            const oldest = sorted.pop();
+            try { fs.unlinkSync(path.join(backupsDir, oldest.name)); } catch {}
+        }
+    }
+}
+
+// Check backups every 30 minutes
+setInterval(checkScheduledBackups, 30 * 60 * 1000);
 
 // ================================================================
 // PHASE 18: SERVER INITIALIZATION
@@ -1666,6 +2109,13 @@ async function init() {
         log(`PurpleMC Panel running on port ${PORT}`, 'info');
         log(`Server directory: ${SERVER_DIR}`, 'info');
         log(`Current version: ${CURRENT_VERSION}`, 'info');
+
+        // Auto-start server if configured
+        const s = loadSettings();
+        if (s.autoStart) {
+            log('Auto-start enabled, starting server...', 'info');
+            setTimeout(() => startServer(), 2000);
+        }
     });
 }
 
@@ -1675,4 +2125,3 @@ init().catch(err => {
 });
 
 module.exports = { app, server, io };
-console.log('Test Update v1.0.4-Beta Ready');

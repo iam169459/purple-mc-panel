@@ -41,16 +41,16 @@ UNATTENDED=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --port)           PORT="$2"; shift 2 ;;
-        --install-dir)    INSTALL_DIR="$2"; PANEL_DIR="$INSTALL_DIR/purple-panel"; shift 2 ;;
-        --repo)           REPO_URL="$2"; shift 2 ;;
-        --branch)         BRANCH="$2"; shift 2 ;;
-        --pm2-name)       PM2_NAME="$2"; shift 2 ;;
+        --port)           PORT="${2:?Missing port value}"; shift 2 ;;
+        --install-dir)    INSTALL_DIR="${2:?Missing install-dir value}"; PANEL_DIR="$INSTALL_DIR/purple-panel"; shift 2 ;;
+        --repo)           REPO_URL="${2:?Missing repo URL}"; shift 2 ;;
+        --branch)         BRANCH="${2:?Missing branch name}"; shift 2 ;;
+        --pm2-name)       PM2_NAME="${2:?Missing PM2 name}"; shift 2 ;;
         --no-pm2)         NO_PM2=true; shift ;;
         --no-java)        NO_JAVA=true; shift ;;
         --unattended)     UNATTENDED=true; shift ;;
         --help|-h)        usage ;;
-        *)                err "Unknown option: $1"; usage ;;
+        *)                err "Unknown option: $1"; usage; exit 1 ;;
     esac
 done
 
@@ -148,6 +148,9 @@ install_system_deps() {
 
     local packages="git curl wget"
 
+    info "Installing base system packages: $packages"
+    $PKG_INSTALL $packages
+
     if ! command -v node &>/dev/null; then
         info "Node.js not found. Installing..."
         case "$PKG_MANAGER" in
@@ -180,9 +183,6 @@ install_system_deps() {
     else
         ok "npm $(npm -v) is already installed."
     fi
-
-    info "Installing system packages: $packages"
-    $PKG_INSTALL $packages
 }
 
 # ── Install Java ─────────────────────────────
@@ -192,7 +192,7 @@ install_java() {
         return
     fi
     if command -v java &>/dev/null; then
-        ok "Java $(java -version 2>&1 | head -1 | sed 's/^[^0-9]*//;s/ .*//') is already installed."
+        ok "Java $(java -version 2>&1 | head -1 | grep -oP '"\K[^"]+' || java -version 2>&1 | head -1 | sed 's/.*version //;s/[^0-9.]//g') is already installed."
         return
     fi
     info "Installing Java (OpenJDK 21 JRE)..."
@@ -242,11 +242,18 @@ setup_project() {
         reinstall)
             info "Reinstalling: updating existing code..."
             cd "$PANEL_DIR"
-            git config --global --add safe.directory "$PANEL_DIR" || true
+            # Only add safe.directory if not already present
+            if ! git config --global --get-all safe.directory | grep -qxF "$PANEL_DIR"; then
+                git config --global --add safe.directory "$PANEL_DIR" || true
+            fi
             # Stash any local changes to avoid conflicts
-            git stash --include-untracked 2>/dev/null || true
-            git fetch --all --tags
+            STASH_REF=$(git stash --include-untracked 2>/dev/null || true)
+            git fetch --all --tags 2>/dev/null || git fetch origin "$BRANCH" --depth 1
             git reset --hard "origin/$BRANCH"
+            # Pop stash if changes were saved
+            if [ -n "$STASH_REF" ]; then
+                git stash pop 2>/dev/null || true
+            fi
             ok "Code updated to latest origin/$BRANCH."
             ;;
         new)
@@ -264,7 +271,7 @@ setup_project() {
 install_npm_deps() {
     info "Installing npm production dependencies..."
     cd "$PANEL_DIR"
-    npm install --omit=dev --no-audit --no-fund --quiet
+    npm install --omit=dev --no-audit --no-fund
     ok "npm dependencies installed."
 }
 
@@ -293,7 +300,7 @@ setup_pm2() {
 
     if ! command -v pm2 &>/dev/null; then
         info "Installing PM2 globally..."
-        npm install -g pm2 --quiet
+        npm install -g pm2 --no-audit --no-fund
     else
         ok "PM2 is already installed."
     fi
@@ -328,24 +335,35 @@ EOF
 
     # PM2 startup hook
     info "Configuring PM2 to start on system boot..."
-    pm2 startup systemd -u root --hp /root 2>/dev/null || pm2 startup 2>/dev/null || true
-    ok "PM2 startup hook configured."
+    if pm2 startup systemd -u root --hp /root 2>/dev/null || pm2 startup 2>/dev/null; then
+        ok "PM2 startup hook configured."
+    else
+        warn "PM2 startup hook could not be configured. You may need to run it manually."
+    fi
 }
 
 # ── Firewall ─────────────────────────────────
 setup_firewall() {
     if command -v ufw &>/dev/null; then
         if ufw status 2>/dev/null | grep -q "active"; then
-            info "Opening port $PORT in UFW..."
-            ufw allow "$PORT/tcp" 2>/dev/null || true
-            ok "UFW rule added for port $PORT."
+            if ! ufw status 2>/dev/null | grep -q "$PORT/tcp"; then
+                info "Opening port $PORT in UFW..."
+                ufw allow "$PORT/tcp" >/dev/null 2>&1 || true
+                ok "UFW rule added for port $PORT."
+            else
+                ok "UFW rule for port $PORT already exists."
+            fi
         fi
     elif command -v firewall-cmd &>/dev/null; then
         if firewall-cmd --state 2>/dev/null | grep -q "running"; then
-            info "Opening port $PORT in firewalld..."
-            firewall-cmd --zone=public --add-port="$PORT/tcp" --permanent 2>/dev/null || true
-            firewall-cmd --reload 2>/dev/null || true
-            ok "Firewalld rule added for port $PORT."
+            if ! firewall-cmd --list-ports 2>/dev/null | grep -q "$PORT/tcp"; then
+                info "Opening port $PORT in firewalld..."
+                firewall-cmd --zone=public --add-port="$PORT/tcp" --permanent >/dev/null 2>&1 || true
+                firewall-cmd --reload >/dev/null 2>&1 || true
+                ok "Firewalld rule added for port $PORT."
+            else
+                ok "Firewalld rule for port $PORT already exists."
+            fi
         fi
     fi
 }
