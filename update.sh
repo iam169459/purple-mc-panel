@@ -4,58 +4,73 @@
 PANEL_DIR="/var/www/purple-mc-panel"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 BRANCH="main"
+RESTART_CMD="pm2 restart purple-mc-panel"
 
-# Change this to your preferred Node process manager (e.g., "pm2 restart app.js" or "systemctl restart purple-panel")
-RESTART_CMD="pm2 restart app.js" 
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
 
-# Colors for scannable output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+# Safety trap to ensure cursor returns if script is broken off mid-spinner
+cleanup() {
+    tput cnorm
+}
+trap cleanup EXIT INT TERM
+
+show_spinner() {
+    local pid=$1
+    local message=$2
+    local delay=0.08
+    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    
+    tput civis
+    while kill -0 "$pid" 2>/dev/null; do
+        for (( i=0; i<${#spinstr}; i++ )); do
+            printf "\r${CYAN}[%c]${NC} %s" "${spinstr:$i:1}" "$message"
+            sleep $delay
+        done
+    done
+    printf "\r\033[K" # Clear line out
+    tput cnorm
+}
 
 echo -e "${YELLOW}==================================================${NC}"
-echo -e "${YELLOW} Starting Full Update for: purple-mc-panel (${BRANCH})${NC}"
+echo -e "${YELLOW} Syncing Panel codebase to origin/${BRANCH}...     ${NC}"
 echo -e "${YELLOW}==================================================${NC}"
 
 # 1. Navigate to directory
-cd "$PANEL_DIR" || { echo -e "${RED}Error: Panel directory not found!${NC}"; exit 1; }
+cd "$PANEL_DIR" || { echo -e "${RED}[ERR] Directory path unreachable!${NC}"; exit 1; }
 
-# 2. Ensure the remote URL is correctly pointed to your repo
+# 2. Reset remote origin validation
 git remote set-url origin "$REPO_URL" 2>/dev/null
 
-# 3. Fetch all remote changes safely
-echo -e "${YELLOW}[1/5] Fetching latest changes from GitHub...${NC}"
-git fetch --all
+# 3. Fetching updates
+git fetch --all >/dev/null 2>&1 &
+show_spinner $! "Scanning upstream git commits on remote..."
 
-# 4. Hard reset to discard old modified files and sync with remote main
-echo -e "${YELLOW}[2/5] Resetting directory to match origin/${BRANCH} exactly...${NC}"
-git reset --hard "origin/$BRANCH"
+# 4. Hard resetting directory
+git reset --hard "origin/$BRANCH" >/dev/null 2>&1 &
+show_spinner $! "Overwriting altered tracking configurations..."
 
-# 5. Wipe out old untracked files or deleted directory leftovers
-echo -e "${YELLOW}[3/5] Cleaning up old, untracked junk files...${NC}"
-git clean -df
+# 5. Scrub old artifacts
+git clean -df >/dev/null 2>&1 &
+show_spinner $! "Scrubbing un-tracked runtime debris files..."
 
-# 6. Synchronize node modules (installs new, prunes deprecated)
-echo -e "${YELLOW}[4/5] Syncing Node.js packages...${NC}"
-npm prune
-npm install --production
+# 6. Synchronizing Node Dependencies
+npm prune >/dev/null 2>&1
+npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1 &
+show_spinner $! "Updating dependencies via production tree..."
 
-# 7. Ensure permissions are clean (optional but recommended for /var/www)
-chmod +x update.sh install.sh 2>/dev/null
+# 7. Make scripts executable
+chmod +x update.sh install.sh 2>/dev/null || true
 
-# 8. Restart the Node.js application interface only
-echo -e "${YELLOW}[5/5] Executing panel restart command...${NC}"
-eval "$RESTART_CMD"
-
-if [ $? -eq 0 ]; then
+# 8. Reload process engine without dropping Java child threads
+echo -e "${CYAN}[INFO] Executing target manager restart...${NC}"
+if eval "$RESTART_CMD" >/dev/null 2>&1; then
     echo -e "${GREEN}==================================================${NC}"
-    echo -e "${GREEN} Success: Repository synced and Panel restarted!${NC}"
-    echo -e "${GREEN} Note: Independent Minecraft servers were not touched.${NC}"
+    echo -e "${GREEN} Update completed perfectly. Web UI restarted.    ${NC}"
+    echo -e "${GREEN} Minecraft screen processes remain un-touched.   ${NC}"
     echo -e "${GREEN}==================================================${NC}"
 else
     echo -e "${RED}==================================================${NC}"
-    echo -e "${RED} Warning: Update applied, but panel failed to restart.${NC}"
-    echo -e "${RED} Please check your process manager logs.${NC}"
+    echo -e "${RED} [WARN] Files synced, but PM2 hook failed to turn. ${NC}"
+    echo -e "${RED} Check process naming mappings manually.          ${NC}"
     echo -e "${RED}==================================================${NC}"
 fi
