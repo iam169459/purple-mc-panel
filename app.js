@@ -1902,11 +1902,12 @@ app.post('/api/update/install', (req, res) => {
 
     isUpdateRunning = true;
 
-    // Spawn update.sh as detached subprocess
+    // Spawn update.sh as detached subprocess with ROOT_DIR as TARGET_DIR
     const updater = spawn('/bin/bash', ['./update.sh'], {
         cwd: ROOT_DIR,
         detached: true,
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, TARGET_DIR: ROOT_DIR }
     });
 
     updater.unref();
