@@ -1,4 +1,4 @@
 {
-  "version": "1.0.5",
-  "notes": "Installer shows real npm output on dependency install failures."
+  "version": "1.0.6",
+  "notes": "Installer now actually installs Node.js on fresh machines (function existed but was never called), so npm works on first-time servers."
 }

@@ -14,7 +14,7 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.2.2"
+SCRIPT_VERSION="1.2.3"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 INSTALL_DIR="/var/www/purple-mc-panel"
 PANEL_DIR="$INSTALL_DIR"
@@ -248,6 +248,7 @@ install_system_deps() {
         exit 1
     fi
     ok "Base tools ready."
+    install_node_if_needed
 }
 
 install_node_if_needed() {
