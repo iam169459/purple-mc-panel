@@ -14,7 +14,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC
 
 # Safety reset for the cursor on exit or crash
 cleanup() {
-    tput cnorm
+    tput cnorm 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -52,16 +52,15 @@ show_spinner() {
 usage() {
     echo "Usage: $0 [options]"
     echo "Options:"
-    echo "  --port <port>        Panel port (default: 3000)"
+    echo "  --port <port>        Panel port (default: 3000, 1-65535)"
     echo "  --install-dir <path> Installation directory (default: $INSTALL_DIR)"
     echo "  --repo <url>         Git repository URL (default: $REPO_URL)"
     echo "  --branch <branch>    Git branch to deploy (default: main)"
     echo "  --pm2-name <name>    PM2 process name (default: $PM2_NAME)"
     echo "  --no-pm2             Skip PM2 setup"
     echo "  --no-java            Skip Java installation"
-    echo "  --unattended         Run without prompts"
+    echo "  --unattended         Run without prompts (requires root)"
     echo "  --help               Show this help"
-    exit 0
 }
 
 # ── Parse arguments ──────────────────────────
@@ -70,6 +69,7 @@ BRANCH="main"
 NO_PM2=false
 NO_JAVA=false
 UNATTENDED=false
+NEEDS_NPM=true
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -81,24 +81,36 @@ while [[ $# -gt 0 ]]; do
         --no-pm2)         NO_PM2=true; shift ;;
         --no-java)        NO_JAVA=true; shift ;;
         --unattended)     UNATTENDED=true; shift ;;
-        --help|-h)        usage ;;
+        --help|-h)        usage; exit 0 ;;
         *)                err "Unknown option: $1"; usage; exit 1 ;;
     esac
 done
 
-if [[ $EUID -ne 0 ]]; then
-    warn "It is recommended to run this installer as root (sudo)."
-    if ! $UNATTENDED; then
-        read -rp "Continue without root? [y/N] " ans
-        [[ "$ans" =~ ^[Yy]$ ]] || exit 1
-    fi
+# Validate numeric options before touching anything.
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+    err "Invalid port: $PORT (expected 1-65535)"
+    exit 1
 fi
 
-clear
-typewriter "${CYAN}╔══════════════════════════════════════════╗${NC}" 0.002
-typewriter "${CYAN}║        PurpleMC Panel Installer          ║${NC}" 0.002
-typewriter "${CYAN}╚══════════════════════════════════════════╝${NC}" 0.002
-echo ""
+if [[ $EUID -ne 0 ]]; then
+    if $UNATTENDED; then
+        err "This installer needs root privileges. Re-run with: sudo $0 $*"
+        exit 1
+    fi
+    warn "It is recommended to run this installer as root (sudo)."
+    read -rp "Continue without root? [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] || exit 1
+fi
+
+if [[ -t 1 ]] && ! $UNATTENDED; then
+    clear
+    typewriter "${CYAN}╔══════════════════════════════════════════╗${NC}" 0.002
+    typewriter "${CYAN}║        PurpleMC Panel Installer          ║${NC}" 0.002
+    typewriter "${CYAN}╚══════════════════════════════════════════╝${NC}" 0.002
+    echo ""
+else
+    echo -e "${CYAN} PurpleMC Panel Installer ${NC} (unattended/non-TTY)"
+fi
 
 choose_mode() {
     local HAS_EXISTING=false
@@ -148,80 +160,141 @@ detect_pkg_manager() {
     fi
 }
 
-install_system_deps() {
-    info "Updating system core package manifests..."
-    $PKG_UPDATE >/dev/null 2>&1 &
-    show_spinner $! "Refreshing internal repository mirrors..."
-    
-    local packages="git curl wget ca-certificates gnupg"
-    $PKG_INSTALL $packages >/dev/null 2>&1 &
-    show_spinner $! "Validating basic software packages ($packages)..."
+install_node_if_needed() {
+    local major=""
+    if command -v node &>/dev/null; then
+        major=$(node -v 2>/dev/null | sed 's/^v//;s/\..*//')
+    fi
+    if [[ -n "$major" ]] && (( major >= 18 )); then
+        ok "Node.js $(node -v) detected (>= 18) — skipping install."
+        return
+    fi
+    if [[ -n "$major" ]]; then
+        warn "Node.js v$major is too old (panel needs >= 18). Installing Node 20 LTS..."
+    else
+        info "Node.js not found. Installing Node 20 LTS..."
+    fi
+
+    local pid
+    case "$PKG_MANAGER" in
+        apt)
+            mkdir -p /etc/apt/keyrings
+            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg >/dev/null 2>&1 &
+            pid=$!; show_spinner "$pid" "Adding NodeSource signing key..."; wait "$pid" 2>/dev/null || true
+            echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+            apt-get update -y >/dev/null 2>&1 &
+            pid=$!; show_spinner "$pid" "Refreshing apt with NodeSource..."; wait "$pid" 2>/dev/null || true
+            apt-get install -y nodejs >/dev/null 2>&1 &
+            pid=$!; show_spinner "$pid" "Installing Node.js 20..."; wait "$pid" 2>/dev/null || true
+            ;;
+        dnf|yum)
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
+            $PKG_INSTALL nodejs >/dev/null 2>&1 &
+            pid=$!; show_spinner "$pid" "Installing Node.js 20..."; wait "$pid" 2>/dev/null || true
+            ;;
+        *)
+            $PKG_INSTALL nodejs npm >/dev/null 2>&1 || true
+            ;;
+    esac
 
     if ! command -v node &>/dev/null; then
-        info "Node.js environment missing. Building NodeSource Node.js 20 LTS environment..."
-        case "$PKG_MANAGER" in
-            apt)
-                mkdir -p /etc/apt/keyrings
-                curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg >/dev/null 2>&1
-                echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list >/dev/null
-                apt-get update -y >/dev/null 2>&1 && apt-get install nodejs -y >/dev/null 2>&1
-                ;;
-            dnf|yum)
-                curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
-                $PKG_INSTALL nodejs >/dev/null 2>&1
-                ;;
-            *)
-                $PKG_INSTALL nodejs npm >/dev/null 2>&1 || true
-                ;;
-        esac
-        ok "Node.js environment configuration integrated."
-    else
-        ok "Node.js $(node -v) runtime already up-to-date."
+        err "Node.js could not be installed. Install Node 18+ manually and re-run."
+        exit 1
     fi
+    ok "Node.js $(node -v) ready."
+}
+
+install_system_deps() {
+    info "Updating system package indexes..."
+    local pid
+    $PKG_UPDATE >/dev/null 2>&1 &
+    pid=$!; show_spinner "$pid" "Refreshing package mirrors..."; wait "$pid" 2>/dev/null || true
+
+    local packages="git curl wget ca-certificates gnupg"
+    $PKG_INSTALL $packages >/dev/null 2>&1 &
+    pid=$!; show_spinner "$pid" "Installing base tools ($packages)..."
+    if ! wait "$pid"; then
+        err "Failed to install base packages via $PKG_MANAGER."
+        exit 1
+    fi
+
+    install_node_if_needed
 }
 
 install_java() {
     if $NO_JAVA; then return; fi
+
     if command -v java &>/dev/null; then
-        ok "Java Runtime Interface present: $(java -version 2>&1 | head -n 1)"
-        return
+        local existing
+        existing=$(java -version 2>&1 | awk -F'"' '/version/ {print $2}' | cut -d. -f1)
+        if [[ -n "$existing" ]] && (( existing >= 17 )); then
+            ok "Java $(java -version 2>&1 | head -n 1 | sed 's/.*version //;s/"//g') present (>= 17) — good to go."
+            return
+        fi
+        warn "Java $existing detected — Minecraft 1.20+ needs Java 17+. Installing OpenJDK 21..."
+    else
+        info "Java not found. Installing OpenJDK 21 headless..."
     fi
+
+    local jpid
     case "$PKG_MANAGER" in
-        apt)     $PKG_INSTALL openjdk-21-jre-headless >/dev/null 2>&1 & ;;
-        dnf|yum) $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
-        *)       $PKG_INSTALL jre21-openjdk-headless >/dev/null 2>&1 & ;;
+        apt)         $PKG_INSTALL openjdk-21-jre-headless >/dev/null 2>&1 & ;;
+        dnf|yum)     $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
+        zypper)      $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
+        pacman)      $PKG_INSTALL jre-openjdk-headless >/dev/null 2>&1 & ;;
+        *)           $PKG_INSTALL jre21-openjdk-headless >/dev/null 2>&1 & ;;
     esac
-    show_spinner $! "Deploying heavy environment: OpenJDK 21 Headless JRE..."
-    ok "Java virtualization structures attached."
+    jpid=$!
+    show_spinner "$jpid" "Installing OpenJDK 21 Headless JRE..."
+    if ! wait "$jpid"; then
+        err "Java installation failed."
+        exit 1
+    fi
+    if ! command -v java &>/dev/null; then
+        err "java still not on PATH after install — check the package name for $PKG_MANAGER."
+        exit 1
+    fi
+    ok "Java ready: $(java -version 2>&1 | head -n 1)"
 }
 
 setup_project() {
     case "$INSTALL_MODE" in
-        fresh)
+        reinstall)
+            cd "$PANEL_DIR" || { err "Install dir missing: $PANEL_DIR"; exit 1; }
+            git config --global --add safe.directory "$PANEL_DIR" || true
+            local prev
+            prev=$(git rev-parse HEAD 2>/dev/null || echo "")
+            git fetch --all >/dev/null 2>&1 &
+            local fetchpid=$!
+            show_spinner "$fetchpid" "Fetching latest changes from GitHub..."
+            wait "$fetchpid" 2>/dev/null || warn "Fetch failed (network?) — continuing with local refs."
+            git reset --hard "origin/$BRANCH" >/dev/null 2>&1 || { err "Reset to origin/$BRANCH failed."; exit 1; }
+            # Keep runtime data (config/, .env, logs) — clean must never wipe it.
+            git clean -df -e config -e .env -e logs >/dev/null 2>&1 || true
+            if [[ -n "$prev" ]] && git diff --quiet "$prev" HEAD -- package.json package-lock.json 2>/dev/null; then
+                NEEDS_NPM=false
+                ok "Code synced — dependencies unchanged, npm install skipped."
+            fi
+            ;;
+        new|fresh)
+            # Handles both a bare fresh install and re-purposing a directory
+            # that exists without being a git checkout (e.g. a failed run).
             if [[ -d "$PANEL_DIR" ]]; then
-                [[ -f "$PANEL_DIR/.env" ]] && cp "$PANEL_DIR/.env" /tmp/pmc-env-backup
-                [[ -d "$PANEL_DIR/config" ]] && cp -r "$PANEL_DIR/config" /tmp/pmc-config-backup
+                warn "Directory exists — backing up .env and config/ before reset."
+                [[ -f "$PANEL_DIR/.env" ]] && cp "$PANEL_DIR/.env" "/tmp/pmc-env-backup.$$"
+                [[ -d "$PANEL_DIR/config" ]] && cp -r "$PANEL_DIR/config" "/tmp/pmc-config-backup.$$"
                 rm -rf "$PANEL_DIR"
             fi
             mkdir -p "$INSTALL_DIR"
             git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$PANEL_DIR" >/dev/null 2>&1 &
-            show_spinner $! "Fresh-cloning full clean tracking environment..."
-            
-            if [[ -f /tmp/pmc-env-backup ]]; then cp /tmp/pmc-env-backup "$PANEL_DIR/.env"; fi
-            if [[ -d /tmp/pmc-config-backup ]]; then cp -r /tmp/pmc-config-backup "$PANEL_DIR/config"; fi
-            ;;
-        reinstall)
-            cd "$PANEL_DIR"
-            git config --global --add safe.directory "$PANEL_DIR" || true
-            git fetch --all >/dev/null 2>&1 &
-            show_spinner $! "Connecting to GitHub remote targets..."
-            git reset --hard "origin/$BRANCH" >/dev/null 2>&1
-            git clean -df >/dev/null 2>&1
-            ;;
-        new)
-            mkdir -p "$INSTALL_DIR"
-            git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$PANEL_DIR" >/dev/null 2>&1 &
-            show_spinner $! "Pulling latest files from upstream repository branch..."
+            local clonepid=$!
+            show_spinner "$clonepid" "Cloning PurpleMC Panel ($BRANCH)..."
+            if ! wait "$clonepid"; then
+                err "Git clone failed — check network access to $REPO_URL"
+                exit 1
+            fi
+            if [[ -f "/tmp/pmc-env-backup.$$" ]]; then cp "/tmp/pmc-env-backup.$$" "$PANEL_DIR/.env"; rm -f "/tmp/pmc-env-backup.$$"; fi
+            if [[ -d "/tmp/pmc-config-backup.$$" ]]; then cp -r "/tmp/pmc-config-backup.$$" "$PANEL_DIR/config"; rm -rf "/tmp/pmc-config-backup.$$"; fi
             ;;
     esac
     cd "$PANEL_DIR"
@@ -230,10 +303,19 @@ setup_project() {
 
 install_npm_deps() {
     cd "$PANEL_DIR"
-    npm prune >/dev/null 2>&1
+    if ! $NEEDS_NPM; then
+        info "Dependencies unchanged — skipping npm install."
+        return
+    fi
+    info "Installing production dependencies (npm install --omit=dev)..."
+    local pid
     npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1 &
-    show_spinner $! "Syncing application system dependencies via npm..."
-    ok "Modules folder structurally clean."
+    pid=$!; show_spinner "$pid" "Installing Node modules..."
+    if ! wait "$pid"; then
+        err "npm install failed."
+        exit 1
+    fi
+    ok "Node modules ready."
 }
 
 create_env() {
@@ -252,7 +334,13 @@ setup_pm2() {
     if $NO_PM2; then return; fi
     if ! command -v pm2 &>/dev/null; then
         npm install -g pm2 --no-audit --no-fund >/dev/null 2>&1 &
-        show_spinner $! "Installing global PM2 instance runtime..."
+        local pm2pid=$!
+        show_spinner "$pm2pid" "Installing global PM2 runtime..."
+        wait "$pm2pid" 2>/dev/null || true
+    fi
+    if ! command -v pm2 &>/dev/null; then
+        err "PM2 install failed — rerun with --no-pm2 or fix the npm global install."
+        exit 1
     fi
 
     cat > "$PANEL_DIR/ecosystem.config.cjs" <<EOF
@@ -283,7 +371,9 @@ EOF
 
 setup_firewall() {
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
-        ufw allow "$PORT/tcp" >/dev/null 2>&1 || true
+        ufw allow "$PORT/tcp" >/dev/null 2>&1 || true    # panel UI
+        ufw allow 25565/tcp >/dev/null 2>&1 || true      # Minecraft server
+        ufw allow 19132/udp >/dev/null 2>&1 || true      # Bedrock (Geyser)
     fi
 }
 
