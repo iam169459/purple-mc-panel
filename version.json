@@ -1,4 +1,4 @@
 {
-  "version": "1.0.3",
-  "notes": "Installer gains a guided 'setup' wizard for brand-new servers/PCs with OS detection (Linux/macOS/Windows guidance)."
+  "version": "1.0.4",
+  "notes": "Installer no longer wipes a directory it is running from, and clone failures now show the real git error."
 }

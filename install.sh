@@ -14,7 +14,7 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.2.0"
+SCRIPT_VERSION="1.2.1"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 INSTALL_DIR="/var/www/purple-mc-panel"
 PANEL_DIR="$INSTALL_DIR"
@@ -106,6 +106,15 @@ confirm() { # $1 = question
     local ans
     ans=$(prompt "$1 [y/N]" "n")
     [[ "$ans" =~ ^[Yy]$ ]]
+}
+
+# True when the current working directory is $1 or anything inside it
+# (resolves symlinks — /tmp on macOS is a link to /private/tmp).
+cwd_inside() {
+    local cwd_p dir_p
+    cwd_p="$(pwd -P)"
+    if [[ -d "$1" ]]; then dir_p="$(cd "$1" 2>/dev/null && pwd -P)" || dir_p="$1"; else dir_p="$1"; fi
+    [[ "$cwd_p" == "$dir_p" || "$cwd_p" == "$dir_p/"* ]]
 }
 
 banner() {
@@ -351,6 +360,14 @@ fetch_code() { # new|fresh|reinstall handled here; fresh==new are identical exce
             ok "Code synced to origin/$BRANCH ($(git rev-parse --short HEAD))."
             ;;
         new|fresh)
+            # Never wipe a directory the caller's shell is inside: a deleted
+            # cwd breaks every child process (e.g. git clone can't resolve
+            # the working directory). Step out of it first.
+            if cwd_inside "$PANEL_DIR"; then
+                warn "Running from inside the install directory — switching to / before resetting it."
+                cd /
+                RAN_FROM_TARGET=1
+            fi
             if [[ -d "$PANEL_DIR" ]]; then
                 warn "Directory exists — backing up .env and config/ first."
                 [[ -f "$PANEL_DIR/.env" ]] && cp "$PANEL_DIR/.env" "/tmp/pmc-env.$$"
@@ -358,10 +375,18 @@ fetch_code() { # new|fresh|reinstall handled here; fresh==new are identical exce
                 rm -rf "$PANEL_DIR"
             fi
             mkdir -p "$INSTALL_DIR"
-            git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$PANEL_DIR" >/dev/null 2>&1 &
-            local cp=$!
+            local clog cp
+            clog="$(mktemp /tmp/pmc-clone-XXXXXX.log)"
+            git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$PANEL_DIR" >"$clog" 2>&1 &
+            cp=$!
             show_spinner "$cp" "Cloning PurpleMC Panel ($BRANCH)..."
-            if ! wait "$cp"; then err "Clone failed — check network access to $REPO_URL"; exit 1; fi
+            if ! wait "$cp"; then
+                err "Clone failed — git output tail:"
+                tail -n 10 "$clog" | sed 's/^/    /'
+                err "Check network access to $REPO_URL and re-run."
+                exit 1
+            fi
+            rm -f "$clog"
             if [[ -f "/tmp/pmc-env.$$" ]]; then cp "/tmp/pmc-env.$$" "$PANEL_DIR/.env"; rm -f "/tmp/pmc-env.$$"; fi
             if [[ -d "/tmp/pmc-config.$$" ]]; then cp -r "/tmp/pmc-config.$$" "$PANEL_DIR/config"; rm -rf "/tmp/pmc-config.$$"; fi
             ok "Panel cloned into $PANEL_DIR."
@@ -526,6 +551,9 @@ cmd_setup() {
     echo ""
     run_install_stages
     ok "Your new PurpleMC Panel is ready — open the panel URL from the summary above."
+    if [[ -n "${RAN_FROM_TARGET:-}" ]]; then
+        info "Your terminal was inside the old install dir — run: cd $PANEL_DIR"
+    fi
 }
 
 # ════════════════════════════════════════════════════════════
@@ -604,6 +632,7 @@ cmd_uninstall() {
     echo -e "\n${RED}This will remove the PM2 service AND delete $PANEL_DIR entirely.${NC}"
     confirm "Really uninstall PurpleMC Panel?" || { err "Cancelled."; exit 1; }
     command -v pm2 &>/dev/null && pm2 delete "$PM2_NAME" >/dev/null 2>&1 && pm2 save --silent || true
+    if cwd_inside "$PANEL_DIR"; then cd /; fi  # never rm the cwd we're inside
     if [[ -d "$PANEL_DIR" ]]; then rm -rf "$PANEL_DIR" && ok "Removed $PANEL_DIR."; fi
     ok "Uninstall complete."
 }
