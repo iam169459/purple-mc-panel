@@ -91,6 +91,7 @@ On first boot the panel automatically downloads the latest **Paper** server jar 
 
 ```bash
 ./install.sh            # interactive menu
+./install.sh setup      # guided first-time setup on a brand-new server/PC (asks dir, port, PM2, Java)
 sudo ./install.sh       # one-shot install (new or reinstall, auto-detected)
 ./install.sh update     # sync latest code from GitHub, keep config/worlds/backups
 ./install.sh status     # service + code version

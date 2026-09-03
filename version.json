@@ -1,4 +1,4 @@
 {
-  "version": "1.0.2",
-  "notes": "Installer now surfaces real package-manager errors and falls back from OpenJDK 21 to OpenJDK 17 on distros that only ship 17."
+  "version": "1.0.3",
+  "notes": "Installer gains a guided 'setup' wizard for brand-new servers/PCs with OS detection (Linux/macOS/Windows guidance)."
 }

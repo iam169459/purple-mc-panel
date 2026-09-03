@@ -14,7 +14,7 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.2.0"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 INSTALL_DIR="/var/www/purple-mc-panel"
 PANEL_DIR="$INSTALL_DIR"
@@ -68,6 +68,7 @@ usage() {
     echo ""
     echo "Actions:"
     echo "  (none)            Interactive menu"
+    echo "  setup             Guided full setup on a brand-new server/PC (from zero)"
     echo "  install           Install or reinstall the panel (auto-detects existing install)"
     echo "  update            Sync panel code from GitHub (keeps config, worlds, backups)"
     echo "  fresh             Wipe the install directory and install from scratch"
@@ -130,11 +131,30 @@ detect_pkg_manager() {
     elif command -v zypper &>/dev/null; then
         PKG_MANAGER="zypper";  PKG_INSTALL="zypper install -y";    PKG_UPDATE="zypper refresh"
     elif command -v pacman &>/dev/null; then
-        PKG_MANAGER="pacman";  PKG_INSTALL="pacman -S --noconfirm"; PKG_UPDATE="pacman -Sy"
+        PKG_MANAGER="pacman"; PKG_INSTALL="pacman -S --noconfirm"; PKG_UPDATE="pacman -Sy"
+    elif command -v brew &>/dev/null; then
+        PKG_MANAGER="brew"; PKG_INSTALL="brew install"; PKG_UPDATE="brew update"
     else
-        err "No supported package manager found (apt/dnf/yum/zypper/pacman)."
+        err "No supported package manager found (apt/dnf/yum/zypper/pacman, or Homebrew on macOS)."
         exit 1
     fi
+}
+
+detect_os() {
+    local os_name
+    os_name="$(uname -s)"
+    case "$os_name" in
+        Linux)  info "OS: Linux detected." ;;
+        Darwin)
+            info "OS: macOS detected."
+            command -v brew &>/dev/null || { err "macOS setup needs Homebrew — install it from https://brew.sh and re-run."; exit 1; }
+            ;;
+        *)
+            err "Unsupported OS: $os_name"
+            err "On Windows, run this inside WSL2 (Ubuntu) or use a Linux server/VM."
+            exit 1
+            ;;
+    esac
 }
 
 require_root() {
@@ -242,6 +262,9 @@ install_node_if_needed() {
             pkg_run "Adding NodeSource repository..." bash -c "curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -" || true
             pkg_run "Installing Node.js 20..." $PKG_INSTALL nodejs || true
             ;;
+        brew)
+            pkg_run "Installing Node.js via Homebrew..." brew install node || true
+            ;;
         *)  $PKG_INSTALL nodejs npm >/dev/null 2>&1 || true ;;
     esac
     command -v node &>/dev/null || { err "Node.js install failed — install Node 18+ manually and re-run."; exit 1; }
@@ -270,6 +293,7 @@ install_java() {
         dnf|yum)  candidates=(java-21-openjdk-headless java-17-openjdk-headless) ;;
         zypper)   candidates=(java-21-openjdk-headless java-17-openjdk-headless) ;;
         pacman)   candidates=(jre-openjdk-headless) ;;
+        brew)     candidates=(openjdk@21 openjdk@17 openjdk) ;;
         *)        candidates=(jre21-openjdk-headless openjdk-17-jre-headless) ;;
     esac
 
@@ -281,6 +305,20 @@ install_java() {
             command -v java &>/dev/null && break
         fi
     done
+
+    # Homebrew installs are keg-only — put the JRE on PATH for this script
+    # (and any process it spawns) so 'java' resolves without extra config.
+    if [[ "$PKG_MANAGER" == "brew" ]] && ! command -v java &>/dev/null; then
+        local brewopt d
+        brewopt="$(brew --prefix 2>/dev/null)/opt"
+        for d in openjdk@21 openjdk@17 openjdk; do
+            if [[ -x "$brewopt/$d/bin/java" ]]; then
+                export PATH="$brewopt/$d/bin:$PATH"
+                export JAVA_HOME="$brewopt/$d/libexec/openjdk.jdk/Contents/Home"
+                break
+            fi
+        done
+    fi
 
     if command -v java &>/dev/null; then
         ok "Java ready: $(java -version 2>&1 | head -n1)"
@@ -418,6 +456,10 @@ cmd_install() {
     require_root "$ACTION ${ARGS:-}"
     find_panel_dir
     choose_mode
+    run_install_stages
+}
+
+run_install_stages() {
     detect_pkg_manager
     [[ "$INSTALL_MODE" == "reinstall" ]] || install_system_deps
     install_java
@@ -427,6 +469,63 @@ cmd_install() {
     setup_pm2
     open_firewall
     summary
+}
+
+# ── NEW SERVER / PC — guided first-time setup ──
+wizard_prompts() {
+    if $UNATTENDED || [[ ! -t 0 && ! -e /dev/tty ]]; then
+        info "Unattended mode — using defaults (dir=$PANEL_DIR, port=$PORT, pm2=$([ $NO_PM2 ] && echo off || echo on))."
+        return
+    fi
+    info "First-time setup wizard — press Enter to accept the default."
+    echo ""
+    local ans
+    ans=$(prompt "Install directory [${PANEL_DIR}]:" "$PANEL_DIR");           INSTALL_DIR="$ans"; PANEL_DIR="$ans"
+    ans=$(prompt "Panel HTTP port [${PORT}]:" "$PORT");                       PORT="$ans"
+    ans=$(prompt "Git branch to deploy [${BRANCH}]:" "$BRANCH");             BRANCH="$ans"
+    ans=$(prompt "Manage with PM2? [Y/n]:" "y");
+    if [[ "$ans" =~ ^[Nn] ]]; then NO_PM2=true; else
+        ans=$(prompt "PM2 process name [${PM2_NAME}]:" "$PM2_NAME");         PM2_NAME="$ans"
+    fi
+    ans=$(prompt "Install Java 17+ (needed for Minecraft)? [Y/n]:" "y");
+    [[ "$ans" =~ ^[Nn] ]] && NO_JAVA=true
+
+    if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+        err "Invalid port: $PORT (expected 1-65535)"
+        exit 1
+    fi
+    echo ""
+}
+
+cmd_setup() {
+    banner
+    require_root "setup ${ARGS:-}"
+    detect_os
+    find_panel_dir
+    wizard_prompts
+
+    # A truly new server/PC: the target directory must be empty or absent,
+    # or the user must explicitly confirm wiping whatever is there.
+    if [[ -d "$PANEL_DIR" ]] && [[ -n "$(ls -A "$PANEL_DIR" 2>/dev/null)" ]]; then
+        if $UNATTENDED; then
+            err "$PANEL_DIR exists and is not empty — refusing to wipe it unattended."
+            err "Point --install-dir at an empty location, or run 'fresh' with confirmation."
+            exit 1
+        fi
+        warn "$PANEL_DIR already exists and is not empty."
+        if ! confirm "Wipe it for a fresh first-time install?"; then
+            err "Cancelled — nothing was changed."
+            exit 1
+        fi
+        INSTALL_MODE="fresh"
+    else
+        INSTALL_MODE="new"
+    fi
+
+    info "Starting full setup on $PANEL_DIR ..."
+    echo ""
+    run_install_stages
+    ok "Your new PurpleMC Panel is ready — open the panel URL from the summary above."
 }
 
 # ════════════════════════════════════════════════════════════
@@ -531,29 +630,31 @@ show_menu() {
     while true; do
         banner
         echo -e "  ${CYAN}Select an option:${NC}\n"
-        echo -e "  ${GREEN}1)${NC} 🚀  Install panel        (new or reinstall)"
-        echo -e "  ${GREEN}2)${NC} 🔄  Update panel          (sync GitHub, keep data)"
-        echo -e "  ${GREEN}3)${NC} ♻️   Fresh install         (wipe & scratch install)"
-        echo -e "  ${GREEN}4)${NC} ▶️   Start service"
-        echo -e "  ${GREEN}5)${NC} ⏹️   Stop service"
-        echo -e "  ${GREEN}6)${NC} 🔁  Restart service"
-        echo -e "  ${GREEN}7)${NC} 📊  Status"
-        echo -e "  ${GREEN}8)${NC} 📜  Logs"
-        echo -e "  ${GREEN}9)${NC} 🗑️   Uninstall"
+        echo -e "  ${GREEN}1)${NC} 🚀  New server/PC setup  (guided full install from zero)"
+        echo -e "  ${GREEN}2)${NC} 📦  Install panel        (new or reinstall)"
+        echo -e "  ${GREEN}3)${NC} 🔄  Update panel          (sync GitHub, keep data)"
+        echo -e "  ${GREEN}4)${NC} ♻️   Fresh install         (wipe & scratch install)"
+        echo -e "  ${GREEN}5)${NC} ▶️   Start service"
+        echo -e "  ${GREEN}6)${NC} ⏹️   Stop service"
+        echo -e "  ${GREEN}7)${NC} 🔁  Restart service"
+        echo -e "  ${GREEN}8)${NC} 📊  Status"
+        echo -e "  ${GREEN}9)${NC} 📜  Logs"
+        echo -e "  ${GREEN}10)${NC} 🗑️   Uninstall"
         echo -e "  ${GREEN}0)${NC} Exit\n"
         local choice
-        choice=$(prompt "Choose [0-9]:" "0")
+        choice=$(prompt "Choose [0-10]:" "0")
         echo ""
         case "$choice" in
-            1) INSTALL_MODE=""; cmd_install ;;
-            2) cmd_update ;;
-            3) INSTALL_MODE="fresh"; cmd_install ;;
-            4) cmd_service start ;;
-            5) cmd_service stop ;;
-            6) cmd_service restart ;;
-            7) cmd_status ;;
-            8) cmd_logs ;;
-            9) cmd_uninstall ;;
+            1) INSTALL_MODE=""; cmd_setup ;;
+            2) INSTALL_MODE=""; cmd_install ;;
+            3) cmd_update ;;
+            4) INSTALL_MODE="fresh"; cmd_install ;;
+            5) cmd_service start ;;
+            6) cmd_service stop ;;
+            7) cmd_service restart ;;
+            8) cmd_status ;;
+            9) cmd_logs ;;
+            10) cmd_uninstall ;;
             0) echo -e "${GREEN}Bye!${NC}"; exit 0 ;;
             *) warn "Invalid choice." ;;
         esac
@@ -574,7 +675,7 @@ ARGS=""
 ACTION=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        install|update|fresh|start|stop|restart|status|logs|uninstall)
+        setup|install|update|fresh|start|stop|restart|status|logs|uninstall)
             ACTION="$1"; shift ;;
         --port)        PORT="${2:?Missing port value}"; ARGS="$ARGS $1 $2"; shift 2 ;;
         --install-dir) INSTALL_DIR="${2:?Missing install-dir value}"; INSTALL_DIR_SET=true; PANEL_DIR="$INSTALL_DIR"; ARGS="$ARGS $1 $2"; shift 2 ;;
@@ -599,11 +700,12 @@ case "$ACTION" in
         if [[ -t 0 ]]; then
             show_menu                       # interactive shell → menu
         elif [[ -e /dev/tty ]]; then
-            cmd_install                     # piped one-liner (curl | sudo bash) → install
+            cmd_setup                       # piped one-liner on a fresh machine → full setup
         else
             usage; exit 1                   # fully headless → be explicit
         fi
         ;;
+    setup)     INSTALL_MODE=""; cmd_setup ;;
     install)   INSTALL_MODE=""; cmd_install ;;
     fresh)     INSTALL_MODE="fresh"; cmd_install ;;
     update)    cmd_update ;;
