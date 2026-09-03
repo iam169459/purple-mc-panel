@@ -1,4 +1,4 @@
 {
-  "version": "1.0.6",
-  "notes": "Installer now actually installs Node.js on fresh machines (function existed but was never called), so npm works on first-time servers."
+  "version": "1.0.7",
+  "notes": "Fix one-click plugin installs picking incompatible jars: version matching now checks the full supported Minecraft range of each build (and prefers stable builds), so Essential Pack and marketplace installs always download the right jar for the configured server version."
 }

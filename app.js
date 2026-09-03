@@ -1780,31 +1780,65 @@ async function runPluginInstall(req, res, resourceId, source, name) {
     try {
         // Resolve download URL from the appropriate source
         if (source === 'modrinth') {
-            const vRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
-                params: { loaders: JSON.stringify(['paper', 'purpur', 'spigot', 'bukkit']) },
-                timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
-            });
-            let versions = vRes.data;
-            if (!versions || versions.length === 0) {
-                // Fallback: try without loader filter
-                const fallbackRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
+            // Loader-filtered first: Modrinth deduplicates the response to the
+            // relevant builds, which keeps big projects (WorldEdit: 185
+            // versions) small enough to scan client-side.
+            let versions = null;
+            try {
+                const vRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
+                    params: { loaders: JSON.stringify(['paper', 'purpur', 'spigot', 'bukkit']) },
                     timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
                 });
-                versions = fallbackRes.data;
+                versions = vRes.data;
+            } catch {}
+            if (!versions || versions.length === 0) {
+                // Fallback: try without loader filter
+                try {
+                    const fallbackRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
+                        timeout: 10000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
+                    });
+                    versions = fallbackRes.data;
+                } catch {}
             }
-            // Find first version with a downloadable file, preferring Paper-compatible loaders
-            let best = null;
+            versions = versions || [];
+
+            // Plugin jar for the running Minecraft version. Many plugins ship
+            // ONE polyglot jar that supports 1.8→1.21+, listing the oldest
+            // supported version first — so we must match the target against
+            // the WHOLE supported list, never just game_versions[0]. Stable
+            // builds beat betas; newer patch beats older. If the filtered
+            // list somehow lacks a build for the target, re-fetch unfiltered
+            // and scan that instead (dedup can hide a compatible build).
             const serverSettings = loadSettings();
-            const targetVer = serverSettings.serverVersion || '';
-            for (const v of versions) {
-                if (!v.files || !v.files[0] || !v.files[0].url) continue;
+            const targetVer = (serverSettings.serverVersion || '').trim();
+            const isPluginBuild = (v) => {
+                if (!v.files || !v.files[0] || !v.files[0].url) return false;
                 const loaders = (v.loaders || []).map(l => l.toLowerCase());
-                const isPlugin = loaders.some(l => ['paper', 'purpur', 'spigot', 'bukkit'].includes(l));
-                if (!isPlugin) continue;
-                const gameVer = (v.game_versions || [])[0] || '';
-                // Prefer exact version match, then any Paper-compatible
-                if (targetVer && gameVer === targetVer) { best = v; break; }
-                if (!best) best = v;
+                return loaders.some(l => ['paper', 'purpur', 'spigot', 'bukkit'].includes(l));
+            };
+            const supports = (v) => {
+                if (!targetVer) return true; // no configured target → newest works
+                return (v.game_versions || []).includes(targetVer);
+            };
+            const stableOrder = (v) => /(-|^)(beta|alpha|pre|rc|snapshot)/i.test(v.version_number || '') ? 1 : 0;
+            const newer = (a, b) => { // prefer stable over beta, then list order (newest first)
+                const s = stableOrder(a) - stableOrder(b);
+                return s !== 0 ? s : 0;
+            };
+
+            let compatible = versions.filter(v => isPluginBuild(v) && supports(v));
+            if (!targetVer) compatible = compatible.sort(newer);
+            let best = compatible[0] || null;
+
+            // The filtered scan missed → widen with the full version list.
+            if (!best && targetVer) {
+                try {
+                    const wideRes = await axios.get(`${MODRINTH_API}/project/${resourceId}/version`, {
+                        timeout: 15000, headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
+                    });
+                    compatible = (wideRes.data || []).filter(v => isPluginBuild(v) && supports(v));
+                    best = compatible[0] || null;
+                } catch {}
             }
             if (!best) {
                 // Explain WHY resolution failed so the user can act on it.
