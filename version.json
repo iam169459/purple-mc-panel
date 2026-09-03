@@ -1,4 +1,4 @@
 {
-  "version": "1.0.0",
-  "notes": "Panel version manifest. The updater compares this file against the same file in the GitHub repository (raw.githubusercontent.com/iam169459/purple-mc-panel). Bump 'version' whenever you publish changes so installs can detect the new release."
+  "version": "1.0.1",
+  "notes": "Unified install.sh manager (install/update/status/logs/uninstall) replaces the separate update.sh. Bump this file and push to publish."
 }

@@ -1,31 +1,45 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# ============================================================
+# PurpleMC Panel — Unified Manager (install / update / run)
+# Single script replacing the old install.sh + update.sh pair.
+#
+#   ./install.sh                  interactive menu (TTY)
+#   ./install.sh install [flags]  new or reinstall (auto-detected)
+#   ./install.sh update           sync code from GitHub, keep data
+#   ./install.sh status|start|stop|restart|logs|uninstall
+#
+# Flags (all commands): --port --install-dir --repo --branch
+#   --pm2-name --no-pm2 --no-java --unattended --help
+# ============================================================
+
 set -Eeuo pipefail
 
-# ──────────────────────────────────────────────
-# PurpleMC Panel — Linux Auto-Installer (Animated)
-# ──────────────────────────────────────────────
-
+SCRIPT_VERSION="1.0.0"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 INSTALL_DIR="/var/www/purple-mc-panel"
 PANEL_DIR="$INSTALL_DIR"
 PM2_NAME="purple-mc-panel"
+PORT="3000"
+BRANCH="main"
+NO_PM2=false
+NO_JAVA=false
+UNATTENDED=false
+NEEDS_NPM=true
+INSTALL_DIR_SET=false
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; MAGENTA='\033[0;35m'; NC='\033[0m'
 
-# Safety reset for the cursor on exit or crash
-cleanup() {
-    tput cnorm 2>/dev/null || true
-}
+cleanup() { tput cnorm 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
-info()  { echo -e "${CYAN}[INFO]${NC} $1"; }
-ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-err()   { echo -e "${RED}[ERR]${NC} $1"; }
+info()   { echo -e "${CYAN}[INFO]${NC} $1"; }
+ok()     { echo -e "${GREEN}[ OK ]${NC} $1"; }
+warn()   { echo -e "${YELLOW}[WARN]${NC} $1"; }
+err()    { echo -e "${RED}[ERR ]${NC} $1"; }
+hr()     { echo -e "${CYAN}──────────────────────────────────────────────────────${NC}"; }
 
 typewriter() {
-    local text="$1"
-    local delay=${2:-0.005}
+    local text="$1" delay="${2:-0.004}"
     for (( i=0; i<${#text}; i++ )); do
         printf "%s" "${text:$i:1}"
         sleep "$delay"
@@ -34,156 +48,179 @@ typewriter() {
 }
 
 show_spinner() {
-    local pid=$1
-    local message=$2
-    local delay=0.08
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    tput civis
+    local pid=$1 message=$2 delay=0.07 spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    tput civis 2>/dev/null || true
     while kill -0 "$pid" 2>/dev/null; do
         for (( i=0; i<${#spinstr}; i++ )); do
             printf "\r${CYAN}[%c]${NC} %s" "${spinstr:$i:1}" "$message"
-            sleep $delay
+            sleep "$delay"
         done
     done
     printf "\r\033[K"
-    tput cnorm
+    tput cnorm 2>/dev/null || true
 }
 
+step() { echo -e "\n${MAGENTA}──${NC} ${YELLOW}Step $1/${2}${NC} — ${CYAN}$3${NC}"; }
+
 usage() {
-    echo "Usage: $0 [options]"
+    echo "PurpleMC Panel Manager v$SCRIPT_VERSION"
+    echo "Usage: $0 [action] [options]"
+    echo ""
+    echo "Actions:"
+    echo "  (none)            Interactive menu"
+    echo "  install           Install or reinstall the panel (auto-detects existing install)"
+    echo "  update            Sync panel code from GitHub (keeps config, worlds, backups)"
+    echo "  fresh             Wipe the install directory and install from scratch"
+    echo "  start | stop | restart   Control the PM2 service"
+    echo "  status            Show service and code status"
+    echo "  logs              Tail PM2 logs"
+    echo "  uninstall         Remove the service and install directory"
+    echo ""
     echo "Options:"
     echo "  --port <port>        Panel port (default: 3000, 1-65535)"
-    echo "  --install-dir <path> Installation directory (default: $INSTALL_DIR)"
+    echo "  --install-dir <path> Panel directory (default: $INSTALL_DIR)"
     echo "  --repo <url>         Git repository URL (default: $REPO_URL)"
     echo "  --branch <branch>    Git branch to deploy (default: main)"
     echo "  --pm2-name <name>    PM2 process name (default: $PM2_NAME)"
     echo "  --no-pm2             Skip PM2 setup"
     echo "  --no-java            Skip Java installation"
-    echo "  --unattended         Run without prompts (requires root)"
-    echo "  --help               Show this help"
+    echo "  --unattended         No prompts (requires root for install/fresh/uninstall)"
+    echo "  --help, -h           Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  sudo $0 --unattended --port 8080          # one-shot install"
+    echo "  $0 update                                  # update an existing panel"
+    echo "  $0 status"
 }
 
-# ── Parse arguments ──────────────────────────
-PORT="3000"
-BRANCH="main"
-NO_PM2=false
-NO_JAVA=false
-UNATTENDED=false
-NEEDS_NPM=true
+# ── prompt/confirm helpers (work even when piped via curl) ──
+prompt() { # $1 = question, $2 = default
+    local ans
+    if [[ -t 0 ]]; then read -rp "$1 " ans
+    elif [[ -e /dev/tty ]]; then read -rp "$1 " ans < /dev/tty
+    else echo "$2"; return 0; fi
+    [[ -n "$ans" ]] && echo "$ans" || echo "$2"
+}
+confirm() { # $1 = question
+    local ans
+    ans=$(prompt "$1 [y/N]" "n")
+    [[ "$ans" =~ ^[Yy]$ ]]
+}
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --port)           PORT="${2:?Missing port value}"; shift 2 ;;
-        --install-dir)    INSTALL_DIR="${2:?Missing install-dir value}"; PANEL_DIR="$INSTALL_DIR"; shift 2 ;;
-        --repo)           REPO_URL="${2:?Missing repo URL}"; shift 2 ;;
-        --branch)         BRANCH="${2:?Missing branch name}"; shift 2 ;;
-        --pm2-name)       PM2_NAME="${2:?Missing PM2 name}"; shift 2 ;;
-        --no-pm2)         NO_PM2=true; shift ;;
-        --no-java)        NO_JAVA=true; shift ;;
-        --unattended)     UNATTENDED=true; shift ;;
-        --help|-h)        usage; exit 0 ;;
-        *)                err "Unknown option: $1"; usage; exit 1 ;;
-    esac
-done
+banner() {
+    if [[ -t 1 ]] && ! $UNATTENDED; then
+        clear 2>/dev/null || true
+        typewriter "${CYAN}╔══════════════════════════════════════════════╗${NC}" 0.002
+        typewriter "${CYAN}║      PurpleMC Panel Manager  v${SCRIPT_VERSION}      ║${NC}" 0.002
+        typewriter "${CYAN}╚══════════════════════════════════════════════╝${NC}" 0.002
+        echo ""
+    else
+        echo -e "${CYAN} PurpleMC Panel Manager v${SCRIPT_VERSION} ${NC}"
+    fi
+}
 
-# Validate numeric options before touching anything.
-if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
-    err "Invalid port: $PORT (expected 1-65535)"
-    exit 1
-fi
-
-if [[ $EUID -ne 0 ]]; then
-    if $UNATTENDED; then
-        err "This installer needs root privileges. Re-run with: sudo $0 $*"
+# ── environment detection ──
+detect_pkg_manager() {
+    if command -v apt &>/dev/null; then
+        PKG_MANAGER="apt";     PKG_INSTALL="apt-get install -y";   PKG_UPDATE="apt-get update -y"
+    elif command -v dnf &>/dev/null; then
+        PKG_MANAGER="dnf";     PKG_INSTALL="dnf install -y";       PKG_UPDATE="dnf check-update || true"
+    elif command -v yum &>/dev/null; then
+        PKG_MANAGER="yum";     PKG_INSTALL="yum install -y";       PKG_UPDATE="yum check-update || true"
+    elif command -v zypper &>/dev/null; then
+        PKG_MANAGER="zypper";  PKG_INSTALL="zypper install -y";    PKG_UPDATE="zypper refresh"
+    elif command -v pacman &>/dev/null; then
+        PKG_MANAGER="pacman";  PKG_INSTALL="pacman -S --noconfirm"; PKG_UPDATE="pacman -Sy"
+    else
+        err "No supported package manager found (apt/dnf/yum/zypper/pacman)."
         exit 1
     fi
-    warn "It is recommended to run this installer as root (sudo)."
-    read -rp "Continue without root? [y/N] " ans
-    [[ "$ans" =~ ^[Yy]$ ]] || exit 1
-fi
+}
 
-if [[ -t 1 ]] && ! $UNATTENDED; then
-    clear
-    typewriter "${CYAN}╔══════════════════════════════════════════╗${NC}" 0.002
-    typewriter "${CYAN}║        PurpleMC Panel Installer          ║${NC}" 0.002
-    typewriter "${CYAN}╚══════════════════════════════════════════╝${NC}" 0.002
-    echo ""
-else
-    echo -e "${CYAN} PurpleMC Panel Installer ${NC} (unattended/non-TTY)"
-fi
+require_root() {
+    if [[ $EUID -ne 0 ]]; then
+        err "This action needs root privileges. Re-run with: sudo $0 $*"
+        exit 1
+    fi
+}
+
+find_panel_dir() { # explicit --install-dir wins, else cwd when it's a clone, else default
+    if $INSTALL_DIR_SET; then PANEL_DIR="$INSTALL_DIR"; return; fi
+    if [[ -d .git ]] && [[ -f app.js ]]; then PANEL_DIR="$(pwd)"; else PANEL_DIR="$INSTALL_DIR"; fi
+}
+
+pm2_cmd() {
+    if ! command -v pm2 &>/dev/null; then
+        err "PM2 is not installed (or not on PATH for this user)."
+        return 1
+    fi
+    pm2 "$@"
+}
+
+# ════════════════════════════════════════════════════════════
+# INSTALL FLOW
+# ════════════════════════════════════════════════════════════
 
 choose_mode() {
-    local HAS_EXISTING=false
-    [[ -d "$PANEL_DIR/.git" ]] && HAS_EXISTING=true
+    local has_git=false
+    [[ -d "$PANEL_DIR/.git" ]] && has_git=true
 
-    if $UNATTENDED; then
-        if $HAS_EXISTING; then INSTALL_MODE="reinstall"; else INSTALL_MODE="new"; fi
+    if $UNATTENDED || [[ ! -t 0 && ! -e /dev/tty ]]; then
+        if $has_git; then INSTALL_MODE="reinstall"; else INSTALL_MODE="new"; fi
         return
     fi
 
-    echo -e "  ${CYAN}Select installation type:${NC}\n"
-    if $HAS_EXISTING; then
-        echo -e "    ${GREEN}1)${NC} ${YELLOW}Reinstall${NC}  — Sync code repo, keep config & data"
-        echo -e "    ${GREEN}2)${NC} ${RED}Fresh Install${NC} — Wipe directory completely and scratch install"
-        echo -e "    ${GREEN}3)${NC} Cancel\n"
-        read -rp "   Choose [1-3]: " choice
-        case "$choice" in
-            1) INSTALL_MODE="reinstall" ;;
-            2) INSTALL_MODE="fresh" ;;
-            *) err "Installation cancelled."; exit 1 ;;
-        esac
+    hr
+    echo -e "  ${CYAN}Where should the panel go?${NC}\n"
+    echo -e "    Directory : ${YELLOW}$PANEL_DIR${NC}"
+    if $has_git; then
+        echo -e "    Existing  : ${GREEN}git install found${NC}\n"
+        echo -e "  ${GREEN}1)${NC} Reinstall     — sync latest code, keep config/worlds/backups"
+        echo -e "  ${GREEN}2)${NC} Fresh Install — wipe directory, scratch install"
+        echo -e "  ${GREEN}3)${NC} Cancel"
     else
-        echo -e "    ${GREEN}1)${NC} ${YELLOW}New Install${NC} — First time backend deployment"
-        echo -e "    ${GREEN}2)${NC} Cancel\n"
-        read -rp "   Choose [1-2]: " choice
-        case "$choice" in
-            1) INSTALL_MODE="new" ;;
-            *) err "Installation cancelled."; exit 1 ;;
-        esac
+        echo -e "  ${GREEN}1)${NC} New Install   — first-time deployment"
+        echo -e "  ${GREEN}2)${NC} Cancel"
     fi
-    echo ""
+    local choice
+    choice=$(prompt "Choose:" "1")
+    case "$choice" in
+        1) $has_git && INSTALL_MODE="reinstall" || INSTALL_MODE="new" ;;
+        2) if $has_git; then INSTALL_MODE="fresh"; else err "Cancelled."; exit 1; fi ;;
+        *) err "Cancelled."; exit 1 ;;
+    esac
 }
 
-detect_pkg_manager() {
-    if command -v apt &>/dev/null; then
-        PKG_MANAGER="apt"; PKG_INSTALL="apt-get install -y"; PKG_UPDATE="apt-get update -y"
-    elif command -v dnf &>/dev/null; then
-        PKG_MANAGER="dnf"; PKG_INSTALL="dnf install -y"; PKG_UPDATE="dnf check-update || true"
-    elif command -v yum &>/dev/null; then
-        PKG_MANAGER="yum"; PKG_INSTALL="yum install -y"; PKG_UPDATE="yum check-update || true"
-    elif command -v zypper &>/dev/null; then
-        PKG_MANAGER="zypper"; PKG_INSTALL="zypper install -y"; PKG_UPDATE="zypper refresh"
-    elif command -v pacman &>/dev/null; then
-        PKG_MANAGER="pacman"; PKG_INSTALL="pacman -S --noconfirm"; PKG_UPDATE="pacman -Sy"
-    else
-        err "No supported package manager found."; exit 1
-    fi
+install_system_deps() {
+    step 1 6 "System packages"
+    local pid
+    $PKG_UPDATE >/dev/null 2>&1 &
+    pid=$!; show_spinner "$pid" "Refreshing package mirrors..."; wait "$pid" 2>/dev/null || true
+
+    $PKG_INSTALL git curl wget ca-certificates gnupg >/dev/null 2>&1 &
+    pid=$!; show_spinner "$pid" "Installing base tools (git, curl, ...)"
+    if ! wait "$pid"; then err "Failed to install base packages."; exit 1; fi
+    ok "Base tools ready."
 }
 
 install_node_if_needed() {
     local major=""
-    if command -v node &>/dev/null; then
-        major=$(node -v 2>/dev/null | sed 's/^v//;s/\..*//')
-    fi
+    if command -v node &>/dev/null; then major=$(node -v 2>/dev/null | sed 's/^v//;s/\..*//'); fi
     if [[ -n "$major" ]] && (( major >= 18 )); then
-        ok "Node.js $(node -v) detected (>= 18) — skipping install."
+        ok "Node.js $(node -v) detected (>= 18)."
         return
     fi
-    if [[ -n "$major" ]]; then
-        warn "Node.js v$major is too old (panel needs >= 18). Installing Node 20 LTS..."
-    else
-        info "Node.js not found. Installing Node 20 LTS..."
-    fi
-
+    [[ -n "$major" ]] && warn "Node.js v$major too old (needs >= 18) — installing Node 20 LTS..." \
+                      || info "Node.js not found — installing Node 20 LTS..."
     local pid
     case "$PKG_MANAGER" in
         apt)
             mkdir -p /etc/apt/keyrings
             curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg >/dev/null 2>&1 &
-            pid=$!; show_spinner "$pid" "Adding NodeSource signing key..."; wait "$pid" 2>/dev/null || true
+            pid=$!; show_spinner "$pid" "Adding NodeSource key..."; wait "$pid" 2>/dev/null || true
             echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
             apt-get update -y >/dev/null 2>&1 &
-            pid=$!; show_spinner "$pid" "Refreshing apt with NodeSource..."; wait "$pid" 2>/dev/null || true
+            pid=$!; show_spinner "$pid" "Refreshing apt (NodeSource)..."; wait "$pid" 2>/dev/null || true
             apt-get install -y nodejs >/dev/null 2>&1 &
             pid=$!; show_spinner "$pid" "Installing Node.js 20..."; wait "$pid" 2>/dev/null || true
             ;;
@@ -192,72 +229,41 @@ install_node_if_needed() {
             $PKG_INSTALL nodejs >/dev/null 2>&1 &
             pid=$!; show_spinner "$pid" "Installing Node.js 20..."; wait "$pid" 2>/dev/null || true
             ;;
-        *)
-            $PKG_INSTALL nodejs npm >/dev/null 2>&1 || true
-            ;;
+        *)  $PKG_INSTALL nodejs npm >/dev/null 2>&1 || true ;;
     esac
-
-    if ! command -v node &>/dev/null; then
-        err "Node.js could not be installed. Install Node 18+ manually and re-run."
-        exit 1
-    fi
+    command -v node &>/dev/null || { err "Node.js install failed — install Node 18+ manually and re-run."; exit 1; }
     ok "Node.js $(node -v) ready."
-}
-
-install_system_deps() {
-    info "Updating system package indexes..."
-    local pid
-    $PKG_UPDATE >/dev/null 2>&1 &
-    pid=$!; show_spinner "$pid" "Refreshing package mirrors..."; wait "$pid" 2>/dev/null || true
-
-    local packages="git curl wget ca-certificates gnupg"
-    $PKG_INSTALL $packages >/dev/null 2>&1 &
-    pid=$!; show_spinner "$pid" "Installing base tools ($packages)..."
-    if ! wait "$pid"; then
-        err "Failed to install base packages via $PKG_MANAGER."
-        exit 1
-    fi
-
-    install_node_if_needed
 }
 
 install_java() {
     if $NO_JAVA; then return; fi
-
     if command -v java &>/dev/null; then
         local existing
         existing=$(java -version 2>&1 | awk -F'"' '/version/ {print $2}' | cut -d. -f1)
         if [[ -n "$existing" ]] && (( existing >= 17 )); then
-            ok "Java $(java -version 2>&1 | head -n 1 | sed 's/.*version //;s/"//g') present (>= 17) — good to go."
+            ok "Java $(java -version 2>&1 | head -n1 | sed 's/.*version //;s/"//g') present (>= 17)."
             return
         fi
-        warn "Java $existing detected — Minecraft 1.20+ needs Java 17+. Installing OpenJDK 21..."
-    else
-        info "Java not found. Installing OpenJDK 21 headless..."
+        warn "Java $existing detected — Minecraft needs Java 17+. Installing OpenJDK 21..."
     fi
-
+    info "Installing OpenJDK 21 headless..."
     local jpid
     case "$PKG_MANAGER" in
-        apt)         $PKG_INSTALL openjdk-21-jre-headless >/dev/null 2>&1 & ;;
-        dnf|yum)     $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
-        zypper)      $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
-        pacman)      $PKG_INSTALL jre-openjdk-headless >/dev/null 2>&1 & ;;
-        *)           $PKG_INSTALL jre21-openjdk-headless >/dev/null 2>&1 & ;;
+        apt)      $PKG_INSTALL openjdk-21-jre-headless >/dev/null 2>&1 & ;;
+        dnf|yum)  $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
+        zypper)   $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
+        pacman)   $PKG_INSTALL jre-openjdk-headless >/dev/null 2>&1 & ;;
+        *)        $PKG_INSTALL jre21-openjdk-headless >/dev/null 2>&1 & ;;
     esac
     jpid=$!
-    show_spinner "$jpid" "Installing OpenJDK 21 Headless JRE..."
-    if ! wait "$jpid"; then
-        err "Java installation failed."
-        exit 1
-    fi
-    if ! command -v java &>/dev/null; then
-        err "java still not on PATH after install — check the package name for $PKG_MANAGER."
-        exit 1
-    fi
-    ok "Java ready: $(java -version 2>&1 | head -n 1)"
+    show_spinner "$jpid" "Installing OpenJDK 21..."
+    if ! wait "$jpid"; then err "Java installation failed."; exit 1; fi
+    command -v java &>/dev/null || { err "java not on PATH after install."; exit 1; }
+    ok "Java ready: $(java -version 2>&1 | head -n1)"
 }
 
-setup_project() {
+fetch_code() { # new|fresh|reinstall handled here; fresh==new are identical except menu naming
+    step 2 6 "Panel code"
     case "$INSTALL_MODE" in
         reinstall)
             cd "$PANEL_DIR" || { err "Install dir missing: $PANEL_DIR"; exit 1; }
@@ -265,82 +271,65 @@ setup_project() {
             local prev
             prev=$(git rev-parse HEAD 2>/dev/null || echo "")
             git fetch --all >/dev/null 2>&1 &
-            local fetchpid=$!
-            show_spinner "$fetchpid" "Fetching latest changes from GitHub..."
-            wait "$fetchpid" 2>/dev/null || warn "Fetch failed (network?) — continuing with local refs."
+            local fp=$!
+            show_spinner "$fp" "Fetching latest changes from GitHub..."
+            wait "$fp" 2>/dev/null || warn "Fetch failed (network?) — continuing with local refs."
             git reset --hard "origin/$BRANCH" >/dev/null 2>&1 || { err "Reset to origin/$BRANCH failed."; exit 1; }
-            # Keep runtime data (config/, .env, logs) — clean must never wipe it.
             git clean -df -e config -e .env -e logs >/dev/null 2>&1 || true
             if [[ -n "$prev" ]] && git diff --quiet "$prev" HEAD -- package.json package-lock.json 2>/dev/null; then
                 NEEDS_NPM=false
-                ok "Code synced — dependencies unchanged, npm install skipped."
             fi
+            ok "Code synced to origin/$BRANCH ($(git rev-parse --short HEAD))."
             ;;
         new|fresh)
-            # Handles both a bare fresh install and re-purposing a directory
-            # that exists without being a git checkout (e.g. a failed run).
             if [[ -d "$PANEL_DIR" ]]; then
-                warn "Directory exists — backing up .env and config/ before reset."
-                [[ -f "$PANEL_DIR/.env" ]] && cp "$PANEL_DIR/.env" "/tmp/pmc-env-backup.$$"
-                [[ -d "$PANEL_DIR/config" ]] && cp -r "$PANEL_DIR/config" "/tmp/pmc-config-backup.$$"
+                warn "Directory exists — backing up .env and config/ first."
+                [[ -f "$PANEL_DIR/.env" ]] && cp "$PANEL_DIR/.env" "/tmp/pmc-env.$$"
+                [[ -d "$PANEL_DIR/config" ]] && cp -r "$PANEL_DIR/config" "/tmp/pmc-config.$$"
                 rm -rf "$PANEL_DIR"
             fi
             mkdir -p "$INSTALL_DIR"
             git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$PANEL_DIR" >/dev/null 2>&1 &
-            local clonepid=$!
-            show_spinner "$clonepid" "Cloning PurpleMC Panel ($BRANCH)..."
-            if ! wait "$clonepid"; then
-                err "Git clone failed — check network access to $REPO_URL"
-                exit 1
-            fi
-            if [[ -f "/tmp/pmc-env-backup.$$" ]]; then cp "/tmp/pmc-env-backup.$$" "$PANEL_DIR/.env"; rm -f "/tmp/pmc-env-backup.$$"; fi
-            if [[ -d "/tmp/pmc-config-backup.$$" ]]; then cp -r "/tmp/pmc-config-backup.$$" "$PANEL_DIR/config"; rm -rf "/tmp/pmc-config-backup.$$"; fi
+            local cp=$!
+            show_spinner "$cp" "Cloning PurpleMC Panel ($BRANCH)..."
+            if ! wait "$cp"; then err "Clone failed — check network access to $REPO_URL"; exit 1; fi
+            if [[ -f "/tmp/pmc-env.$$" ]]; then cp "/tmp/pmc-env.$$" "$PANEL_DIR/.env"; rm -f "/tmp/pmc-env.$$"; fi
+            if [[ -d "/tmp/pmc-config.$$" ]]; then cp -r "/tmp/pmc-config.$$" "$PANEL_DIR/config"; rm -rf "/tmp/pmc-config.$$"; fi
+            ok "Panel cloned into $PANEL_DIR."
             ;;
     esac
     cd "$PANEL_DIR"
-    chmod +x update.sh install.sh 2>/dev/null || true
+    chmod +x install.sh 2>/dev/null || true
 }
 
 install_npm_deps() {
+    step 3 6 "Node modules"
     cd "$PANEL_DIR"
     if ! $NEEDS_NPM; then
         info "Dependencies unchanged — skipping npm install."
         return
     fi
-    info "Installing production dependencies (npm install --omit=dev)..."
     local pid
     npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1 &
-    pid=$!; show_spinner "$pid" "Installing Node modules..."
-    if ! wait "$pid"; then
-        err "npm install failed."
-        exit 1
-    fi
+    pid=$!; show_spinner "$pid" "Installing production dependencies..."
+    if ! wait "$pid"; then err "npm install failed."; exit 1; fi
     ok "Node modules ready."
 }
 
-create_env() {
+write_env_and_ecosystem() {
+    step 4 6 "Configuration"
     if [[ ! -f "$PANEL_DIR/.env" ]]; then
         echo "PORT=$PORT" > "$PANEL_DIR/.env"
+    elif grep -q "^PORT=" "$PANEL_DIR/.env"; then
+        sed -i "s/^PORT=.*/PORT=$PORT/" "$PANEL_DIR/.env"
     else
-        if grep -q "^PORT=" "$PANEL_DIR/.env"; then
-            sed -i "s/^PORT=.*/PORT=$PORT/" "$PANEL_DIR/.env"
-        else
-            echo "PORT=$PORT" >> "$PANEL_DIR/.env"
-        fi
+        echo "PORT=$PORT" >> "$PANEL_DIR/.env"
     fi
-}
+    mkdir -p "$PANEL_DIR/logs"
 
-setup_pm2() {
-    if $NO_PM2; then return; fi
-    if ! command -v pm2 &>/dev/null; then
-        npm install -g pm2 --no-audit --no-fund >/dev/null 2>&1 &
-        local pm2pid=$!
-        show_spinner "$pm2pid" "Installing global PM2 runtime..."
-        wait "$pm2pid" 2>/dev/null || true
-    fi
-    if ! command -v pm2 &>/dev/null; then
-        err "PM2 install failed — rerun with --no-pm2 or fix the npm global install."
-        exit 1
+    if $NO_PM2; then
+        ok ".env written (PORT=$PORT). Skipping PM2 (--no-pm2)."
+        return
     fi
 
     cat > "$PANEL_DIR/ecosystem.config.cjs" <<EOF
@@ -358,7 +347,19 @@ module.exports = {
     }]
 };
 EOF
-    mkdir -p "$PANEL_DIR/logs"
+    ok "ecosystem.config.cjs written."
+}
+
+setup_pm2() {
+    step 5 6 "Service"
+    if $NO_PM2; then return; fi
+    if ! command -v pm2 &>/dev/null; then
+        info "Installing PM2 globally..."
+        local pid
+        npm install -g pm2 --no-audit --no-fund >/dev/null 2>&1 &
+        pid=$!; show_spinner "$pid" "Installing PM2..."; wait "$pid" 2>/dev/null || true
+    fi
+    command -v pm2 &>/dev/null || { err "PM2 install failed — rerun with --no-pm2."; exit 1; }
 
     if pm2 list 2>/dev/null | grep -q "$PM2_NAME"; then
         pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1
@@ -366,39 +367,217 @@ EOF
         pm2 start "$PANEL_DIR/ecosystem.config.cjs" >/dev/null 2>&1
     fi
     pm2 save --silent || true
-    ok "PM2 Process ecosystem verified active under identifier: '$PM2_NAME'"
+    ok "Service '$PM2_NAME' is running (PM2)."
 }
 
-setup_firewall() {
+open_firewall() {
+    step 6 6 "Firewall"
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
-        ufw allow "$PORT/tcp" >/dev/null 2>&1 || true    # panel UI
-        ufw allow 25565/tcp >/dev/null 2>&1 || true      # Minecraft server
-        ufw allow 19132/udp >/dev/null 2>&1 || true      # Bedrock (Geyser)
+        ufw allow "$PORT/tcp"   >/dev/null 2>&1 || true
+        ufw allow 25565/tcp     >/dev/null 2>&1 || true
+        ufw allow 19132/udp     >/dev/null 2>&1 || true
+        ok "ufw opened: $PORT/tcp, 25565/tcp, 19132/udp."
+    else
+        ok "No active ufw — skipping firewall rules."
     fi
 }
 
-print_summary() {
-    local ip
-    ip=$(curl -4 -s ifconfig.me || curl -4 -s icanhazip.com || echo "localhost")
-    echo -e "\n${GREEN}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║        Setup Finished Successfully       ║${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}\n"
-    echo -e "  Panel UI Link:  ${CYAN}http://$ip:$PORT${NC}"
-    echo -e "  Root Directory: $PANEL_DIR"
+cmd_install() {
+    banner
+    require_root "$ACTION ${ARGS:-}"
+    find_panel_dir
+    choose_mode
+    detect_pkg_manager
+    [[ "$INSTALL_MODE" == "reinstall" ]] || install_system_deps
+    install_java
+    fetch_code
+    install_npm_deps
+    write_env_and_ecosystem
+    setup_pm2
+    open_firewall
+    summary
+}
+
+# ════════════════════════════════════════════════════════════
+# UPDATE / SERVICE / MISC
+# ════════════════════════════════════════════════════════════
+
+cmd_update() {
+    banner
+    find_panel_dir
+    if [[ ! -d "$PANEL_DIR/.git" ]]; then
+        err "No git install found at $PANEL_DIR — nothing to update here."
+        info "Run 'sudo $0 install' instead, or point --install-dir at the panel folder."
+        exit 1
+    fi
+    INSTALL_MODE="reinstall"
+    [[ $EUID -ne 0 ]] && warn "Not root — npm and PM2 steps may fail if the panel is root-owned."
+    fetch_code
+    install_npm_deps
+    write_env_and_ecosystem
     if ! $NO_PM2; then
-        echo -e "  Profile Hook:   pm2 status / pm2 logs $PM2_NAME"
+        if command -v pm2 &>/dev/null; then
+            pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1 \
+                && ok "Panel restarted under PM2 ('$PM2_NAME')." \
+                || warn "Could not restart PM2 '$PM2_NAME' — start it manually."
+        else
+            info "PM2 not installed — code updated; start the panel manually."
+        fi
+    fi
+    summary
+}
+
+cmd_service() { # start|stop|restart
+    local action=$1
+    if ! pm2_cmd list >/dev/null 2>&1; then exit 1; fi
+    find_panel_dir
+    case "$action" in
+        start)   if pm2 list 2>/dev/null | grep -q "$PM2_NAME"; then pm2 start "$PM2_NAME" >/dev/null
+                 else pm2 start "$PANEL_DIR/ecosystem.config.cjs" >/dev/null; fi ;;
+        stop)    pm2 stop "$PM2_NAME" >/dev/null ;;
+        restart) pm2 restart "$PM2_NAME" --update-env >/dev/null ;;
+    esac
+    ok "PM2 '$PM2_NAME' $action completed."
+}
+
+cmd_status() {
+    banner
+    find_panel_dir
+    echo ""
+    if command -v pm2 &>/dev/null && pm2 list 2>/dev/null | grep -q "$PM2_NAME"; then
+        pm2 describe "$PM2_NAME" 2>/dev/null | grep -E "status|name|script|exec cwd|restarts|uptime|unstable restarts|created at" | sed 's/^/  /' || true
+    else
+        warn "PM2 service '$PM2_NAME' not running."
+    fi
+    if [[ -d "$PANEL_DIR/.git" ]]; then
+        cd "$PANEL_DIR"
+        echo -e "  ${CYAN}code:${NC} $(git rev-parse --short HEAD) on $(git branch --show-current)"
+        echo -e "  ${CYAN}dir :${NC} $PANEL_DIR"
+    fi
+    if [[ -f "$PANEL_DIR/version.json" ]]; then
+        echo -e "  ${CYAN}panel version:${NC} v$(sed -n 's/.*"version"[^0-9]*\([0-9.]*\).*/\1/p' "$PANEL_DIR/version.json" | head -n1)"
     fi
     echo ""
 }
 
-# ── Main Flow Execution ──────────────────────
-choose_mode
-detect_pkg_manager
-install_system_deps
-install_java
-setup_project
-install_npm_deps
-create_env
-setup_pm2
-setup_firewall
-print_summary
+cmd_logs() {
+    if ! pm2_cmd logs "$PM2_NAME" --lines 50 --nostream; then
+        info "Use: pm2 logs $PM2_NAME (live view)"
+        exit 1
+    fi
+}
+
+cmd_uninstall() {
+    banner
+    require_root "uninstall"
+    find_panel_dir
+    echo -e "\n${RED}This will remove the PM2 service AND delete $PANEL_DIR entirely.${NC}"
+    confirm "Really uninstall PurpleMC Panel?" || { err "Cancelled."; exit 1; }
+    command -v pm2 &>/dev/null && pm2 delete "$PM2_NAME" >/dev/null 2>&1 && pm2 save --silent || true
+    if [[ -d "$PANEL_DIR" ]]; then rm -rf "$PANEL_DIR" && ok "Removed $PANEL_DIR."; fi
+    ok "Uninstall complete."
+}
+
+summary() {
+    local ip
+    ip=$(curl -4 -s -m 6 ifconfig.me || curl -4 -s -m 6 icanhazip.com || echo "localhost")
+    echo ""
+    hr
+    echo -e "${GREEN}  ✅ Setup finished successfully${NC}"
+    hr
+    echo -e "  Panel UI : ${CYAN}http://$ip:$PORT${NC}"
+    echo -e "  Directory: $PANEL_DIR"
+    echo -e "  Commands : ./install.sh status | logs | update"
+    ! $NO_PM2 && echo -e "  PM2      : pm2 status $PM2_NAME / pm2 logs $PM2_NAME"
+    echo ""
+}
+
+# ════════════════════════════════════════════════════════════
+# INTERACTIVE MENU
+# ════════════════════════════════════════════════════════════
+
+show_menu() {
+    while true; do
+        banner
+        echo -e "  ${CYAN}Select an option:${NC}\n"
+        echo -e "  ${GREEN}1)${NC} 🚀  Install panel        (new or reinstall)"
+        echo -e "  ${GREEN}2)${NC} 🔄  Update panel          (sync GitHub, keep data)"
+        echo -e "  ${GREEN}3)${NC} ♻️   Fresh install         (wipe & scratch install)"
+        echo -e "  ${GREEN}4)${NC} ▶️   Start service"
+        echo -e "  ${GREEN}5)${NC} ⏹️   Stop service"
+        echo -e "  ${GREEN}6)${NC} 🔁  Restart service"
+        echo -e "  ${GREEN}7)${NC} 📊  Status"
+        echo -e "  ${GREEN}8)${NC} 📜  Logs"
+        echo -e "  ${GREEN}9)${NC} 🗑️   Uninstall"
+        echo -e "  ${GREEN}0)${NC} Exit\n"
+        local choice
+        choice=$(prompt "Choose [0-9]:" "0")
+        echo ""
+        case "$choice" in
+            1) INSTALL_MODE=""; cmd_install ;;
+            2) cmd_update ;;
+            3) INSTALL_MODE="fresh"; cmd_install ;;
+            4) cmd_service start ;;
+            5) cmd_service stop ;;
+            6) cmd_service restart ;;
+            7) cmd_status ;;
+            8) cmd_logs ;;
+            9) cmd_uninstall ;;
+            0) echo -e "${GREEN}Bye!${NC}"; exit 0 ;;
+            *) warn "Invalid choice." ;;
+        esac
+        echo ""
+        if [[ -t 0 ]] || [[ -e /dev/tty ]]; then
+            confirm "Run another action?" || exit 0
+        else
+            exit 0
+        fi
+    done
+}
+
+# ════════════════════════════════════════════════════════════
+# ARGUMENT PARSING & ENTRY
+# ════════════════════════════════════════════════════════════
+
+ARGS=""
+ACTION=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        install|update|fresh|start|stop|restart|status|logs|uninstall)
+            ACTION="$1"; shift ;;
+        --port)        PORT="${2:?Missing port value}"; ARGS="$ARGS $1 $2"; shift 2 ;;
+        --install-dir) INSTALL_DIR="${2:?Missing install-dir value}"; INSTALL_DIR_SET=true; PANEL_DIR="$INSTALL_DIR"; ARGS="$ARGS $1 $2"; shift 2 ;;
+        --repo)        REPO_URL="${2:?Missing repo URL}"; shift 2 ;;
+        --branch)      BRANCH="${2:?Missing branch name}"; shift 2 ;;
+        --pm2-name)    PM2_NAME="${2:?Missing PM2 name}"; shift 2 ;;
+        --no-pm2)      NO_PM2=true; shift ;;
+        --no-java)     NO_JAVA=true; shift ;;
+        --unattended)  UNATTENDED=true; shift ;;
+        --help|-h)     usage; exit 0 ;;
+        *)             err "Unknown option or action: $1"; usage; exit 1 ;;
+    esac
+done
+
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+    err "Invalid port: $PORT (expected 1-65535)"
+    exit 1
+fi
+
+case "$ACTION" in
+    "")
+        if [[ -t 0 ]]; then
+            show_menu                       # interactive shell → menu
+        elif [[ -e /dev/tty ]]; then
+            cmd_install                     # piped one-liner (curl | sudo bash) → install
+        else
+            usage; exit 1                   # fully headless → be explicit
+        fi
+        ;;
+    install)   INSTALL_MODE=""; cmd_install ;;
+    fresh)     INSTALL_MODE="fresh"; cmd_install ;;
+    update)    cmd_update ;;
+    start|stop|restart) cmd_service "$ACTION" ;;
+    status)    cmd_status ;;
+    logs)      cmd_logs ;;
+    uninstall) cmd_uninstall ;;
+esac

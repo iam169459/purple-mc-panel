@@ -85,6 +85,19 @@ npm start          # serves the panel on http://localhost:3000
 
 On first boot the panel automatically downloads the latest **Paper** server jar into `server/`, accepts the EULA, and you're ready to hit **Start Server**.
 
+### One script to manage it all
+
+`install.sh` is the unified CLI (it replaces the old `install.sh` + `update.sh` pair). With no arguments it opens an **animated interactive menu**; every action also works as a direct command:
+
+```bash
+./install.sh            # interactive menu
+sudo ./install.sh       # one-shot install (new or reinstall, auto-detected)
+./install.sh update     # sync latest code from GitHub, keep config/worlds/backups
+./install.sh status     # service + code version
+./install.sh logs       # tail panel logs
+./install.sh start|stop|restart
+```
+
 ---
 
 ## 🎮 Using the panel
@@ -105,7 +118,7 @@ Updates are checked against this repository's **`version.json`** — the same fi
 2. Installed panels click **Check for Updates** in the *System Update Manager*; when a newer version exists, **Install System Update** streams the deployment (download archive → verify → install, preserving your runtime data → restart).
 3. Offline checks and archive problems are reported clearly; the panel never downgrades or "updates" to an equal version.
 
-Legacy manual updates on a git clone are still possible via `./update.sh` (no longer used by the panel itself).
+Manual CLI updates are also available: run `./install.sh update` from the panel directory (syncs the latest code, keeps config/worlds/backups, and restarts the service).
 
 ### Testing updates against a mirror
 
@@ -124,8 +137,7 @@ npm start
 ```
 app.js            Backend — Express API, Socket.IO events, process control, updater
 public/index.html Frontend — the entire panel UI (Tailwind + Font Awesome, no build step)
-install.sh        Linux auto-installer (PM2 + Node + system setup)
-update.sh         Legacy manual git update script
+install.sh        Unified manager — install / update / status / logs / uninstall + interactive menu
 version.json      Version manifest used for self-updates
 server/           Minecraft server directory (worlds, plugins, server.jar) — gitignored
 config/           Runtime state: settings.json, tasks.json, network allocations, crash log

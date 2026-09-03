@@ -2615,7 +2615,6 @@ async function runGithubUpdate() {
         } else {
             emitUpdateEvent('info', '[STEP 5] Dependencies unchanged — skipping npm install.');
         }
-        try { fs.chmodSync(path.join(ROOT_DIR, 'update.sh'), 0o755); } catch { /* ignore */ }
         try { if (fs.existsSync(path.join(ROOT_DIR, 'install.sh'))) fs.chmodSync(path.join(ROOT_DIR, 'install.sh'), 0o755); } catch { /* ignore */ }
 
         // ── 6 · restart the panel ────────────────────────────────────────
