@@ -14,7 +14,7 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 INSTALL_DIR="/var/www/purple-mc-panel"
 PANEL_DIR="$INSTALL_DIR"
@@ -191,15 +191,33 @@ choose_mode() {
     esac
 }
 
+# Run a package-manager command with a spinner, capturing output to a log so
+# failures always show the real package-manager error instead of a bare "failed".
+pkg_run() { # <label> then command words...
+    local label="$1"; shift
+    local logfile rc pid
+    logfile="$(mktemp /tmp/pmc-pkg-XXXXXX.log)"
+    "$@" >"$logfile" 2>&1 &
+    pid=$!
+    show_spinner "$pid" "$label"
+    wait "$pid" && rc=0 || rc=$?
+    if (( rc != 0 )); then
+        warn "'$*' failed (exit $rc) — output tail:"
+        tail -n 8 "$logfile" | sed 's/^/    /'
+    fi
+    rm -f "$logfile"
+    return "$rc"
+}
+
 install_system_deps() {
     step 1 6 "System packages"
-    local pid
-    $PKG_UPDATE >/dev/null 2>&1 &
-    pid=$!; show_spinner "$pid" "Refreshing package mirrors..."; wait "$pid" 2>/dev/null || true
-
-    $PKG_INSTALL git curl wget ca-certificates gnupg >/dev/null 2>&1 &
-    pid=$!; show_spinner "$pid" "Installing base tools (git, curl, ...)"
-    if ! wait "$pid"; then err "Failed to install base packages."; exit 1; fi
+    if ! pkg_run "Refreshing package mirrors..." $PKG_UPDATE; then
+        warn "Package index update had problems — continuing anyway."
+    fi
+    if ! pkg_run "Installing base tools (git, curl, ...)" $PKG_INSTALL git curl wget ca-certificates gnupg; then
+        err "Failed to install base packages — see the error above."
+        exit 1
+    fi
     ok "Base tools ready."
 }
 
@@ -212,22 +230,17 @@ install_node_if_needed() {
     fi
     [[ -n "$major" ]] && warn "Node.js v$major too old (needs >= 18) — installing Node 20 LTS..." \
                       || info "Node.js not found — installing Node 20 LTS..."
-    local pid
     case "$PKG_MANAGER" in
         apt)
             mkdir -p /etc/apt/keyrings
-            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg >/dev/null 2>&1 &
-            pid=$!; show_spinner "$pid" "Adding NodeSource key..."; wait "$pid" 2>/dev/null || true
+            pkg_run "Adding NodeSource signing key..." bash -c "curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg" || true
             echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
-            apt-get update -y >/dev/null 2>&1 &
-            pid=$!; show_spinner "$pid" "Refreshing apt (NodeSource)..."; wait "$pid" 2>/dev/null || true
-            apt-get install -y nodejs >/dev/null 2>&1 &
-            pid=$!; show_spinner "$pid" "Installing Node.js 20..."; wait "$pid" 2>/dev/null || true
+            pkg_run "Refreshing apt (NodeSource)..." apt-get update -y || true
+            pkg_run "Installing Node.js 20..." apt-get install -y nodejs || true
             ;;
         dnf|yum)
-            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
-            $PKG_INSTALL nodejs >/dev/null 2>&1 &
-            pid=$!; show_spinner "$pid" "Installing Node.js 20..."; wait "$pid" 2>/dev/null || true
+            pkg_run "Adding NodeSource repository..." bash -c "curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -" || true
+            pkg_run "Installing Node.js 20..." $PKG_INSTALL nodejs || true
             ;;
         *)  $PKG_INSTALL nodejs npm >/dev/null 2>&1 || true ;;
     esac
@@ -237,29 +250,47 @@ install_node_if_needed() {
 
 install_java() {
     if $NO_JAVA; then return; fi
+    local existing=""
     if command -v java &>/dev/null; then
-        local existing
         existing=$(java -version 2>&1 | awk -F'"' '/version/ {print $2}' | cut -d. -f1)
         if [[ -n "$existing" ]] && (( existing >= 17 )); then
-            ok "Java $(java -version 2>&1 | head -n1 | sed 's/.*version //;s/"//g') present (>= 17)."
+            ok "Java $(java -version 2>&1 | head -n1 | sed 's/.*version //;s/"//g') present (>= 17) — good to go."
             return
         fi
-        warn "Java $existing detected — Minecraft needs Java 17+. Installing OpenJDK 21..."
+        [[ -n "$existing" ]] && warn "Java $existing is too old for modern Minecraft (needs 17+). Upgrading..."
+    else
+        info "Java not found — installing a compatible JRE..."
     fi
-    info "Installing OpenJDK 21 headless..."
-    local jpid
+
+    # Try the newest package first, then fall back. Distros like Ubuntu 22.04
+    # and Debian 12 only ship OpenJDK 17, which Paper still supports fine.
+    local candidates=()
     case "$PKG_MANAGER" in
-        apt)      $PKG_INSTALL openjdk-21-jre-headless >/dev/null 2>&1 & ;;
-        dnf|yum)  $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
-        zypper)   $PKG_INSTALL java-21-openjdk-headless >/dev/null 2>&1 & ;;
-        pacman)   $PKG_INSTALL jre-openjdk-headless >/dev/null 2>&1 & ;;
-        *)        $PKG_INSTALL jre21-openjdk-headless >/dev/null 2>&1 & ;;
+        apt)      candidates=(openjdk-21-jre-headless openjdk-17-jre-headless) ;;
+        dnf|yum)  candidates=(java-21-openjdk-headless java-17-openjdk-headless) ;;
+        zypper)   candidates=(java-21-openjdk-headless java-17-openjdk-headless) ;;
+        pacman)   candidates=(jre-openjdk-headless) ;;
+        *)        candidates=(jre21-openjdk-headless openjdk-17-jre-headless) ;;
     esac
-    jpid=$!
-    show_spinner "$jpid" "Installing OpenJDK 21..."
-    if ! wait "$jpid"; then err "Java installation failed."; exit 1; fi
-    command -v java &>/dev/null || { err "java not on PATH after install."; exit 1; }
-    ok "Java ready: $(java -version 2>&1 | head -n1)"
+
+    local pkg installed_any=false
+    for pkg in "${candidates[@]}"; do
+        info "Trying: $pkg"
+        if pkg_run "Installing $pkg..." $PKG_INSTALL "$pkg"; then
+            installed_any=true
+            command -v java &>/dev/null && break
+        fi
+    done
+
+    if command -v java &>/dev/null; then
+        ok "Java ready: $(java -version 2>&1 | head -n1)"
+    elif $installed_any; then
+        warn "A JRE was installed, but 'java' is not on PATH. Fix with: update-alternatives --config java"
+    else
+        err "Java installation failed — every candidate package was rejected (details above)."
+        err "Install Java 17+ manually, e.g. 'sudo apt-get install openjdk-17-jre-headless', then re-run."
+        exit 1
+    fi
 }
 
 fetch_code() { # new|fresh|reinstall handled here; fresh==new are identical except menu naming

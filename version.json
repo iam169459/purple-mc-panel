@@ -1,4 +1,4 @@
 {
-  "version": "1.0.1",
-  "notes": "Unified install.sh manager (install/update/status/logs/uninstall) replaces the separate update.sh. Bump this file and push to publish."
+  "version": "1.0.2",
+  "notes": "Installer now surfaces real package-manager errors and falls back from OpenJDK 21 to OpenJDK 17 on distros that only ship 17."
 }
