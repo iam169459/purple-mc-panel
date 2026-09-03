@@ -1,4 +1,4 @@
 {
-  "version": "1.0.4",
-  "notes": "Installer no longer wipes a directory it is running from, and clone failures now show the real git error."
+  "version": "1.0.5",
+  "notes": "Installer shows real npm output on dependency install failures."
 }

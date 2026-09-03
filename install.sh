@@ -14,7 +14,7 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.2.1"
+SCRIPT_VERSION="1.2.2"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 INSTALL_DIR="/var/www/purple-mc-panel"
 PANEL_DIR="$INSTALL_DIR"
@@ -403,10 +403,21 @@ install_npm_deps() {
         info "Dependencies unchanged — skipping npm install."
         return
     fi
-    local pid
-    npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1 &
-    pid=$!; show_spinner "$pid" "Installing production dependencies..."
-    if ! wait "$pid"; then err "npm install failed."; exit 1; fi
+    local nver nver_npm
+    nver=$(node -v 2>/dev/null || echo "MISSING")
+    nver_npm=$(npm -v 2>/dev/null || echo "MISSING")
+    info "Node $nver · npm $nver_npm"
+    local logfile pid
+    logfile="$(mktemp /tmp/pmc-npm-XXXXXX.log)"
+    npm install --omit=dev --no-audit --no-fund >"$logfile" 2>&1 &
+    pid=$!; show_spinner "$pid" "Installing Node modules..."
+    if ! wait "$pid"; then
+        err "npm install failed — output tail:"
+        tail -n 12 "$logfile" | sed 's/^/    /'
+        err "Diagnose manually: cd $PANEL_DIR && npm install"
+        exit 1
+    fi
+    rm -f "$logfile"
     ok "Node modules ready."
 }
 
