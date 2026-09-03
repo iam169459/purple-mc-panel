@@ -36,8 +36,14 @@ const SETTINGS_DB_PATH = path.join(CONFIG_DIR, 'settings.json');
 const JAR_PATH = path.join(SERVER_DIR, 'server.jar');
 const EULA_PATH = path.join(SERVER_DIR, 'eula.txt');
 const SERVER_PROPS_PATH = path.join(SERVER_DIR, 'server.properties');
-const UPDATE_SCRIPT = path.join(ROOT_DIR, 'update.sh');
 const CRASH_LOG_PATH = path.join(CONFIG_DIR, 'crash.log');
+const VERSION_FILE = path.join(ROOT_DIR, 'version.json');
+const GITHUB_OWNER = 'iam169459';
+const GITHUB_REPO = 'purple-mc-panel';
+const GITHUB_BRANCH = 'main'; // default — probed and cached at runtime
+// Env overrides let ops point the updater at a mirror (used in tests too).
+const UPDATE_RAW_URL = process.env.PANEL_UPDATE_RAW_URL || null;
+const UPDATE_ARCHIVE_URL = process.env.PANEL_UPDATE_ARCHIVE_URL || null;
 
 const PORT = process.env.PORT || 3000;
 const PAPER_VERSIONS = {
@@ -74,6 +80,8 @@ const DEFAULT_SETTINGS = {
 };
 
 const GIT_REMOTE_URL = 'https://github.com/iam169459/purple-mc-panel.git';
+const PAPER_API = 'https://fill.papermc.io/v3';
+const USER_AGENT = 'PurpleMC-Panel/1.0 (https://github.com/iam169459/purple-mc-panel)';
 
 const COLORS = {
     reset: '\x1b[0m', green: '\x1b[32m', red: '\x1b[31m',
@@ -110,6 +118,7 @@ function pushToLogBuffer(rawChunk, type) {
         if (trimmed === '' && lineText === '') continue;
 
         parsePlayerEvents(lineText);
+        parseTpsEvents(lineText);
 
         const entry = {
             raw: lineText,
@@ -228,6 +237,43 @@ function parsePlayerEvents(text) {
 }
 
 // ================================================================
+// PHASE 2d: LIVE TPS / MSPT PARSING
+// Parses vanilla/Paper `/tps` and `/mspt` output so the panel can
+// stream tick performance to connected clients in real time.
+// ================================================================
+
+let lastTps = null;
+let lastMspt = null;
+
+function parseTpsEvents(text) {
+    const clean = stripAnsi(text);
+    const tpsMatch = clean.match(/TPS from last 5s: ([\d.]+), 1m: ([\d.]+), 5m: ([\d.]+)/);
+    if (tpsMatch) {
+        lastTps = {
+            tps5s: parseFloat(tpsMatch[1]),
+            tps1m: parseFloat(tpsMatch[2]),
+            tps5m: parseFloat(tpsMatch[3]),
+            timestamp: new Date().toISOString()
+        };
+        emitTpsUpdate();
+        return;
+    }
+    const msptMatch = clean.match(/Server tick times: ([\d.]+) average/);
+    if (msptMatch) {
+        lastMspt = parseFloat(msptMatch[1]);
+        emitTpsUpdate();
+    }
+}
+
+function emitTpsUpdate() {
+    try {
+        if (io && io.engine && io.engine.clientsCount > 0) {
+            io.emit('tps', { tps: lastTps, mspt: lastMspt });
+        }
+    } catch {}
+}
+
+// ================================================================
 // PHASE 3: VERSION & CONFIGURATION
 // ================================================================
 
@@ -250,24 +296,91 @@ function ensureDirectories() {
     });
 }
 
-function downloadFile(url, dest) {
+function downloadFile(url, dest, onProgress, redirectsLeft = 3) {
     return new Promise((resolve, reject) => {
         const file = fs.createWriteStream(dest);
-        https.get(url, (response) => {
-            if (response.statusCode !== 200) {
+        let timer;
+        let stalled;
+        let settled = false;
+        let downloadedBytes = 0;
+        let lastEmit = 0;
+        const fail = (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            clearTimeout(stalled);
+            file.close();
+            try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch {}
+            reject(err);
+        };
+        // Hard cap so a slow or hung transfer can never wedge the panel.
+        timer = setTimeout(() => fail(new Error('Download timed out after 300s')), 300000);
+
+        // Support http:// mirrors as well as https:// so the updater can be
+        // pointed at a local test server via PANEL_UPDATE_*_URL.
+        const client = String(url).startsWith('http:') ? http : https;
+        const req = client.get(url, { headers: { 'User-Agent': USER_AGENT } }, (response) => {
+            // Follow redirects (up to 3 hops) — CDN links often bounce.
+            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location && redirectsLeft > 0) {
+                clearTimeout(timer);
                 file.close();
-                if (fs.existsSync(dest)) fs.unlinkSync(dest);
-                reject(new Error(`HTTP ${response.statusCode}`));
+                const nextUrl = new URL(response.headers.location, url).toString();
+                downloadFile(nextUrl, dest, onProgress, redirectsLeft - 1).then(resolve, reject);
                 return;
             }
+            if (response.statusCode !== 200) {
+                fail(new Error(`HTTP ${response.statusCode}`));
+                return;
+            }
+            const contentLength = parseInt(response.headers['content-length'] || '0', 10) || 0;
+            response.on('data', (chunk) => {
+                downloadedBytes += chunk.length;
+                clearTimeout(stalled);
+                stalled = setTimeout(() => fail(new Error('Download stalled — no data for 60s')), 60000);
+                const now = Date.now();
+                // Smooth, throttled progress callbacks (~2/sec).
+                if (onProgress && now - lastEmit >= 500) {
+                    lastEmit = now;
+                    onProgress(downloadedBytes, contentLength);
+                }
+            });
             response.pipe(file);
-            file.on('finish', () => { file.close(); resolve(); });
-        }).on('error', (err) => {
-            file.close();
-            if (fs.existsSync(dest)) fs.unlinkSync(dest);
-            reject(err);
+            file.on('finish', () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                clearTimeout(stalled);
+                file.close();
+                if (onProgress) onProgress(downloadedBytes, contentLength);
+                resolve();
+            });
         });
+        req.on('error', fail);
     });
+}
+
+/**
+ * resolvePaperDownloadUrl — asks the current PaperMC downloads service
+ * (fill.papermc.io/v3) for the latest stable build of a Minecraft version
+ * and returns its direct download URL. Returns null on any failure so
+ * callers can fall back to the hardcoded URL table.
+ */
+async function resolvePaperDownloadUrl(version) {
+    try {
+        const res = await axios.get(`${PAPER_API}/projects/paper/versions/${encodeURIComponent(version)}/builds`, {
+            headers: { 'User-Agent': USER_AGENT },
+            timeout: 15000
+        });
+        const builds = res.data;
+        if (Array.isArray(builds)) {
+            const pick = builds.find(b => b.channel === 'STABLE' && b.downloads && b.downloads['server:default'] && b.downloads['server:default'].url)
+                || builds.find(b => b.downloads && b.downloads['server:default'] && b.downloads['server:default'].url);
+            if (pick) return pick.downloads['server:default'].url;
+        }
+    } catch (err) {
+        log(`PaperMC API lookup failed for ${version}: ${err.message}`, 'warn');
+    }
+    return null;
 }
 
 async function checkAndDownloadServer() {
@@ -281,10 +394,32 @@ async function checkAndDownloadServer() {
             version = DEFAULT_VERSION;
             url = PAPER_VERSIONS[DEFAULT_VERSION];
         }
+
+        // Prefer the live PaperMC downloads API; fall back to the static table.
+        const liveUrl = await resolvePaperDownloadUrl(version);
+        if (liveUrl) {
+            log(`Resolved latest PaperMC build for ${version}`, 'info');
+            url = liveUrl;
+        } else if (!url) {
+            throw new Error(`No download URL available for version ${version}`);
+        }
+
         try {
-            await downloadFile(url, JAR_PATH);
+            const onProgress = (got, total) => {
+                const pct = total > 0 ? Math.round((got / total) * 100) : 0;
+                const gotMB = (got / 1024 / 1024).toFixed(1);
+                const totMB = total > 0 ? (total / 1024 / 1024).toFixed(1) : '?';
+                const msg = `Downloading PaperMC ${version} ${total > 0 ? pct + '%' : gotMB + ' MB'} (${gotMB}/${totMB} MB)`;
+                pushToLogBuffer(`[SYSTEM] ${msg}`, 'system');
+                emitConsoleSafe(`\n${COLORS.cyan}[DOWNLOAD]${COLORS.reset} ${msg}\n`);
+            };
+            await downloadFile(url, JAR_PATH, onProgress);
+            const jarSize = (fs.statSync(JAR_PATH).size / 1024 / 1024).toFixed(1);
             fs.writeFileSync(EULA_PATH, 'eula=true');
-            log('Server JAR downloaded and eula.txt created', 'info');
+            const doneMsg = `Server JAR ready (${jarSize} MB)`;
+            pushToLogBuffer(`[SYSTEM] ${doneMsg}`, 'system');
+            emitConsoleSafe(`\n${COLORS.green}[DOWNLOAD]${COLORS.reset} ${doneMsg}\n`);
+            log(`Server JAR downloaded and eula.txt created (${jarSize} MB)`, 'info');
         } catch (err) {
             log(`Failed to download server: ${err.message}`, 'error');
             throw err;
@@ -546,10 +681,6 @@ function emitConsoleSafe(msg) {
     try { io.emit('console', msg); } catch {}
 }
 
-function stripAnsi(str) {
-    return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1B\][0-9;]*[a-zA-Z]/g, '');
-}
-
 function stopServer() {
     if (!mcProcess || isStopping) {
         return { success: false, error: 'Server not running' };
@@ -627,14 +758,15 @@ async function getProcessStats() {
 // PHASE 5: ADVANCED METRICS ENGINE (CPU, RAM, DISK)
 // ================================================================
 
-let diskCache = null;
-let diskCacheTime = 0;
+const diskCache = new Map();
 const DISK_CACHE_TTL = 30000;
 
 function getDiskUsage(dirPath) {
+    const key = path.resolve(dirPath);
     const now = Date.now();
-    if (diskCache && now - diskCacheTime < DISK_CACHE_TTL) {
-        return diskCache;
+    const cached = diskCache.get(key);
+    if (cached && now - cached.time < DISK_CACHE_TTL) {
+        return cached.result;
     }
     try {
         const stats = fs.statSync(dirPath);
@@ -674,12 +806,35 @@ function getDiskUsage(dirPath) {
             fileCount,
             dirCount
         };
-        diskCache = result;
-        diskCacheTime = now;
+        diskCache.set(key, { result, time: now });
         return result;
     } catch (err) {
         return { totalBytes: 0, totalMB: 0, totalGB: 0, fileCount: 0, dirCount: 0, error: err.message };
     }
+}
+
+/**
+ * getDiskBreakdown — returns size statistics for each top-level
+ * directory inside the server folder (world, plugins, logs, ...)
+ * sorted largest-first. Powers the dashboard storage breakdown card.
+ */
+function getDiskBreakdown() {
+    const breakdown = [];
+    try {
+        const entries = fs.readdirSync(SERVER_DIR, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(SERVER_DIR, entry.name);
+            if (entry.isDirectory()) {
+                const usage = getDiskUsage(fullPath);
+                if (usage && !usage.error) {
+                    breakdown.push({ name: entry.name, ...usage });
+                }
+            }
+        }
+    } catch (err) {
+        log(`Disk breakdown error: ${err.message}`, 'warn');
+    }
+    return breakdown.sort((a, b) => b.totalBytes - a.totalBytes);
 }
 
 function getSystemMetrics() {
@@ -758,6 +913,21 @@ const pluginUpload = multer({
         cb(null, true);
     },
     limits: { fileSize: 100 * 1024 * 1024 }
+});
+
+// Uploads are staged in the OS temp dir first; the route handler moves
+// them into the (sanitized) target directory once the full body —
+// including the `path` field — has been parsed.
+const fileUpload = multer({
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => cb(null, os.tmpdir()),
+        filename: (req, file, cb) => {
+            const safe = path.basename(file.originalname).replace(/[^a-zA-Z0-9._ -]/g, '_');
+            if (!safe) return cb(new Error('Invalid filename'));
+            cb(null, safe);
+        }
+    }),
+    limits: { fileSize: 500 * 1024 * 1024 }
 });
 
 function sendError(res, message, status = 400) {
@@ -842,6 +1012,12 @@ app.get('/api/server/usage', async (req, res) => {
         log(`Usage metrics error: ${err.message}`, 'error');
         res.status(500).json({ error: err.message });
     }
+});
+
+app.get('/api/server/disk-breakdown', (req, res) => {
+    const breakdown = getDiskBreakdown();
+    const total = getDiskUsage(SERVER_DIR);
+    res.json({ success: true, total, folders: breakdown });
 });
 
 // ================================================================
@@ -1044,6 +1220,72 @@ app.delete('/api/files/:path(*)', (req, res) => {
         if (err.message === 'PATH_TRAVERSAL_DETECTED') return sendError(res, 'Access denied', 403);
         sendError(res, err.message);
     }
+});
+
+app.get('/api/files/download', (req, res) => {
+    const { file: userPath } = req.query;
+    if (!userPath) return sendError(res, 'file parameter is required');
+
+    try {
+        const filePath = sanitizePath(SERVER_DIR, userPath);
+        if (!fs.existsSync(filePath)) return sendError(res, 'File not found', 404);
+        if (fs.statSync(filePath).isDirectory()) return sendError(res, 'Cannot download a directory', 400);
+
+        log(`File downloaded: ${userPath}`, 'info');
+        res.download(filePath, path.basename(filePath));
+    } catch (err) {
+        if (err.message === 'PATH_TRAVERSAL_DETECTED') {
+            log(`Directory traversal attempt blocked: ${userPath}`, 'error');
+            return sendError(res, 'Access denied', 403);
+        }
+        sendError(res, err.message);
+    }
+});
+
+app.post('/api/files/upload', (req, res) => {
+    fileUpload.single('file')(req, res, (err) => {
+        if (err) {
+            if (err instanceof multer.MulterError) {
+                if (err.code === 'LIMIT_FILE_SIZE') return sendError(res, 'File exceeds 500MB limit', 413);
+                return sendError(res, err.message, 400);
+            }
+            return sendError(res, err.message, 400);
+        }
+        if (!req.file) return sendError(res, 'No file uploaded', 400);
+
+        // Resolve and validate the target directory AFTER multer has
+        // fully parsed the multipart body (including the path field).
+        let targetDir;
+        try {
+            targetDir = sanitizePath(SERVER_DIR, req.body.path || '');
+            if (!fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory()) {
+                throw new Error('Target directory not found');
+            }
+        } catch (sanitizeErr) {
+            fs.unlinkSync(req.file.path);
+            if (sanitizeErr.message === 'PATH_TRAVERSAL_DETECTED') {
+                log(`Directory traversal attempt blocked: ${req.body.path || ''}`, 'error');
+                return sendError(res, 'Access denied', 403);
+            }
+            return sendError(res, sanitizeErr.message, 400);
+        }
+
+        const targetPath = path.join(targetDir, req.file.filename);
+        try {
+            if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
+                throw new Error('A folder with that name already exists');
+            }
+            fs.renameSync(req.file.path, targetPath);
+        } catch (moveErr) {
+            try { fs.unlinkSync(req.file.path); } catch {}
+            return sendError(res, moveErr.message || 'Failed to save file', 500);
+        }
+
+        const relDir = path.relative(path.resolve(SERVER_DIR), path.resolve(targetDir)).replace(/\\/g, '/');
+        const relPath = (relDir && relDir !== '.' ? relDir + '/' : '') + req.file.filename;
+        log(`File uploaded: ${relPath} (${(req.file.size / 1024 / 1024).toFixed(2)} MB)`, 'info');
+        res.json({ success: true, path: relPath, name: req.file.filename, size: req.file.size });
+    });
 });
 
 // ================================================================
@@ -1349,12 +1591,14 @@ app.delete('/api/network/allocate/:port', async (req, res) => {
 const SPIGET_API = 'https://api.spiget.org/v2';
 const MODRINTH_API = 'https://api.modrinth.com/v2';
 
+// Every entry is verified to have Paper/Spigot builds on Modrinth, so a
+// one-click install always succeeds.
 const ESSENTIAL_PLUGINS = [
-    { id: 'GeyserMC', name: 'GeyserMC', description: 'Allows Bedrock players to join your Java server, enabling cross-play between Java and Bedrock editions.', icon: 'https://cdn.modrinth.com/data/GeyserMC/icon.png', author: 'GeyserMC Team', source: 'modrinth' },
-    { id: 'floodgate', name: 'Floodgate', description: 'Allows Bedrock players to join without a Java Edition account, simplifying the join process for Bedrock clients.', icon: 'https://cdn.modrinth.com/data/floodgate/icon.png', author: 'GeyserMC Team', source: 'modrinth' },
     { id: 'luckperms', name: 'LuckPerms', description: 'Advanced permissions management with support for groups, contexts, and extensive inheritance trees.', icon: 'https://cdn.modrinth.com/data/luckperms/icon.png', author: 'Luck', source: 'modrinth' },
     { id: 'worldedit', name: 'WorldEdit', description: 'In-game world editing utility with brushes, schematics, and millions of builds at your fingertips.', icon: 'https://cdn.modrinth.com/data/worldedit/icon.png', author: 'EngineHub', source: 'modrinth' },
-    { id: 'essentialsx', name: 'EssentialsX', description: 'Essential server management featuring teleportation, economy, warps, kits, and more.', icon: 'https://cdn.modrinth.com/data/essentialsx/icon.png', author: 'EssentialsX Team', source: 'modrinth' }
+    { id: 'essentialsx', name: 'EssentialsX', description: 'Essential server management featuring teleportation, economy, warps, kits, and more.', icon: 'https://cdn.modrinth.com/data/essentialsx/icon.png', author: 'EssentialsX Team', source: 'modrinth' },
+    { id: 'placeholderapi', name: 'PlaceholderAPI', description: 'Flexible placeholder text system used by thousands of plugins — no more hardcoded text.', icon: 'https://cdn.modrinth.com/data/placeholderapi/icon.png', author: 'PlaceholderAPI Team', source: 'modrinth' },
+    { id: 'coreprotect', name: 'CoreProtect', description: 'Fast block logging and anti-griefing. Inspect changes and roll back griefing with ease.', icon: 'https://cdn.modrinth.com/data/coreprotect/icon.png', author: 'Intelli' , source: 'modrinth' }
 ];
 
 app.get('/api/plugins/essential', (req, res) => {
@@ -1457,12 +1701,68 @@ app.get('/api/plugins/installed', (req, res) => {
     }
 });
 
-app.post('/api/plugins/install', async (req, res) => {
-    if (mcProcess) return sendError(res, 'Stop the server before installing plugins', 409);
+// ----------------------------------------------------------------
+// Plugin install queue — installs run strictly one at a time so
+// multiple marketplace installs never contend for bandwidth or the
+// plugins folder. Requests are chained server-side, which also keeps
+// parallel browser tabs from starting simultaneous downloads.
+// ----------------------------------------------------------------
+let pluginInstallTail = Promise.resolve();
+let pluginInstallQueue = [];
 
+function emitPluginQueue() {
+    try {
+        if (io && io.engine && io.engine.clientsCount > 0) {
+            io.emit('plugin-queue', {
+                active: pluginInstallQueue.length > 0 ? 1 : 0,
+                queued: Math.max(pluginInstallQueue.length - 1, 0),
+                queue: pluginInstallQueue.slice(0, 10)
+            });
+        }
+    } catch {}
+}
+
+function emitProgressNow(pluginId, stage, percent, message, speed) {
+    try {
+        io.emit('plugin-progress', { pluginId, stage, percent, message, speed: speed || null });
+    } catch {}
+}
+
+app.post('/api/plugins/install', (req, res) => {
     const { resourceId, source, name } = req.body;
     if (!resourceId || !source) return sendError(res, 'resourceId and source are required');
 
+    // Installs are allowed while the server runs — Paper picks new jars up
+    // on the next restart. We just make sure the user is told.
+    if (mcProcess) {
+        log(`Plugin install requested while server is running (${resourceId}) — will load on restart`, 'warn');
+    }
+
+    const position = pluginInstallQueue.length + 1;
+    pluginInstallQueue.push(resourceId);
+    emitPluginQueue();
+
+    if (position > 1) {
+        emitProgressNow(resourceId, 'queued', 0, `Queued behind ${position - 1} install(s)...`);
+    }
+
+    const run = pluginInstallTail
+        .then(() => runPluginInstall(req, res, resourceId, source, name))
+        .catch((err) => {
+            // A thrown job must never break the queue.
+            log(`Plugin install job error: ${err.message}`, 'error');
+            if (!res.headersSent) {
+                res.status(500).json({ success: false, error: err.message });
+            }
+        })
+        .finally(() => {
+            pluginInstallQueue = pluginInstallQueue.filter((id) => id !== resourceId);
+            emitPluginQueue();
+        });
+    pluginInstallTail = run;
+});
+
+async function runPluginInstall(req, res, resourceId, source, name) {
     const pluginsDir = path.join(SERVER_DIR, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir, { recursive: true });
 
@@ -1471,8 +1771,8 @@ app.post('/api/plugins/install', async (req, res) => {
     let downloadUrl;
     let suggestedName = name || `plugin-${resourceId}.jar`;
 
-    const emitProgress = (stage, percent, message) => {
-        io.emit('plugin-progress', { pluginId: resourceId, stage, percent, message });
+    const emitProgress = (stage, percent, message, speed) => {
+        emitProgressNow(resourceId, stage, percent, message, speed);
     };
 
     emitProgress('resolving', 0, 'Resolving download URL...');
@@ -1507,8 +1807,17 @@ app.post('/api/plugins/install', async (req, res) => {
                 if (!best) best = v;
             }
             if (!best) {
-                emitProgress('error', 0, 'No Paper-compatible plugin version found');
-                return sendError(res, 'No Paper-compatible version found for this plugin', 404);
+                // Explain WHY resolution failed so the user can act on it.
+                const loaderSet = new Set();
+                for (const v of versions) {
+                    for (const l of (v.loaders || [])) loaderSet.add(l);
+                }
+                const loaderList = [...loaderSet].slice(0, 5).join(', ');
+                const msg = versions.length === 0
+                    ? 'This plugin has no downloadable versions on Modrinth.'
+                    : `This plugin has no Paper/Spigot build on Modrinth (only: ${loaderList || 'other loaders'}). Try searching Spigot instead.`;
+                emitProgress('error', 0, msg);
+                return sendError(res, msg, 404);
             }
             downloadUrl = best.files[0].url;
             suggestedName = best.files[0].filename || suggestedName;
@@ -1537,35 +1846,85 @@ app.post('/api/plugins/install', async (req, res) => {
         const response = await axios({
             method: 'GET', url: downloadUrl, responseType: 'stream',
             timeout: 120000,
+            maxRedirects: 5,
             headers: { 'User-Agent': 'PurpleMC-Panel/1.0' }
         });
 
         const contentLength = parseInt(response.headers['content-length'] || '0', 10);
+        const startTime = Date.now();
         let downloadedBytes = 0;
-        let lastPercent = -1;
+        let lastEmitTime = 0;
+        let lastEmitBytes = 0;
         const writer = fs.createWriteStream(targetPath);
+
+        // Abort the transfer if the upstream stalls for 60s — a hung
+        // download should never leave the panel waiting forever.
+        let stalledTimer = setTimeout(() => {
+            response.data.destroy(new Error('Download stalled — no data received for 60s'));
+        }, 60000);
+
+        const emitDownloadProgress = (force) => {
+            const now = Date.now();
+            const elapsed = Math.max((now - startTime) / 1000, 0.1);
+            const windowSec = Math.max((now - lastEmitTime) / 1000, 0.001);
+            // Instant speed over the last window, blended with the overall
+            // average so the readout stays stable instead of jumping around.
+            const instantBps = (downloadedBytes - lastEmitBytes) / windowSec;
+            const overallBps = downloadedBytes / elapsed;
+            const speedBps = Math.max(instantBps, overallBps * 0.5);
+            const speedMBps = speedBps / 1024 / 1024;
+
+            const percent = contentLength > 0 ? Math.min(Math.round((downloadedBytes / contentLength) * 100), 99) : 0;
+            const downloadedMB = (downloadedBytes / 1024 / 1024).toFixed(1);
+            const totalMB = contentLength > 0 ? (contentLength / 1024 / 1024).toFixed(1) : '?';
+
+            let eta = '';
+            if (contentLength > 0 && speedBps > 0) {
+                const remaining = Math.max(contentLength - downloadedBytes, 0);
+                eta = ` · ETA ${Math.ceil(remaining / speedBps)}s`;
+            }
+
+            const msg = contentLength > 0
+                ? `${percent}% (${downloadedMB}/${totalMB} MB) @ ${speedMBps.toFixed(1)} MB/s${eta}`
+                : `${downloadedMB} MB @ ${speedMBps.toFixed(1)} MB/s`;
+            emitProgress('downloading', percent, `Downloading... ${msg}`, speedMBps);
+            lastEmitBytes = downloadedBytes;
+            lastEmitTime = now;
+        };
 
         response.data.on('data', (chunk) => {
             downloadedBytes += chunk.length;
-            if (contentLength > 0) {
-                const percent = Math.min(Math.round((downloadedBytes / contentLength) * 100), 99);
-                if (percent !== lastPercent) {
-                    lastPercent = percent;
-                    const downloadedMB = (downloadedBytes / 1024 / 1024).toFixed(1);
-                    const totalMB = (contentLength / 1024 / 1024).toFixed(1);
-                    emitProgress('downloading', percent, `Downloading... ${percent}% (${downloadedMB} MB / ${totalMB} MB)`);
-                }
-            } else {
-                const downloadedMB = (downloadedBytes / 1024 / 1024).toFixed(1);
-                emitProgress('downloading', 0, `Downloading... ${downloadedMB} MB`);
+            clearTimeout(stalledTimer);
+            stalledTimer = setTimeout(() => {
+                response.data.destroy(new Error('Download stalled — no data received for 60s'));
+            }, 60000);
+
+            const now = Date.now();
+            // Throttle progress updates to ~1/sec for smooth, non-spammy UI.
+            if (now - lastEmitTime >= 1000) {
+                emitDownloadProgress(false);
             }
         });
 
         response.data.pipe(writer);
 
         await new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', (err) => reject(new Error(`Write failed: ${err.message}`)));
+            response.data.on('error', (err) => {
+                clearTimeout(stalledTimer);
+                try { writer.destroy(); } catch {}
+                try { fs.unlinkSync(targetPath); } catch {}
+                reject(new Error(`Download error: ${err.message}`));
+            });
+            writer.on('finish', () => {
+                clearTimeout(stalledTimer);
+                emitDownloadProgress(true); // final 99%+ readout before verify
+                resolve();
+            });
+            writer.on('error', (err) => {
+                clearTimeout(stalledTimer);
+                try { fs.unlinkSync(targetPath); } catch {}
+                reject(new Error(`Write failed: ${err.message}`));
+            });
         });
 
         // Verification phase
@@ -1578,11 +1937,15 @@ app.post('/api/plugins/install', async (req, res) => {
             return sendError(res, 'Downloaded file is too small, may be corrupted', 502);
         }
 
+        const needsRestart = !!mcProcess;
         const sizeMB = (stat.size / 1024 / 1024).toFixed(2);
-        emitProgress('complete', 100, `${suggestedName} installed successfully (${sizeMB} MB)`);
+        emitProgress('complete', 100, `${suggestedName} installed successfully (${sizeMB} MB)${needsRestart ? ' — restart to load' : ''}`);
         log(`Plugin installed: ${suggestedName} (${sizeMB} MB)`, 'info');
         io.emit('console', `\n${COLORS.green}[PLUGIN]${COLORS.reset} Installed: ${suggestedName}\n`);
-        res.json({ success: true, name: suggestedName, size: stat.size });
+        if (needsRestart) {
+            emitConsoleSafe(`\n${COLORS.yellow}[SYSTEM]${COLORS.reset} Restart the server to load ${suggestedName}\n`);
+        }
+        res.json({ success: true, name: suggestedName, size: stat.size, needsRestart });
 
     } catch (err) {
         log(`Plugin install error: ${err.message}`, 'error');
@@ -1591,12 +1954,9 @@ app.post('/api/plugins/install', async (req, res) => {
             res.status(500).json({ success: false, error: err.message });
         }
     }
-});
+}
 
 app.post('/api/plugins/upload', (req, res) => {
-    if (mcProcess) {
-        return sendError(res, 'Stop the server before installing plugins', 409);
-    }
     pluginUpload.single('plugin')(req, res, (err) => {
         if (err) {
             if (err instanceof multer.MulterError) {
@@ -1610,7 +1970,11 @@ app.post('/api/plugins/upload', (req, res) => {
         const { filename, size, path: filePath } = req.file;
         log(`Plugin uploaded: ${filename} (${(size / 1024 / 1024).toFixed(2)} MB)`, 'info');
         io.emit('console', `\n[PLUGIN] Uploaded: ${filename}\n`);
-        res.json({ success: true, name: filename, size });
+        const needsRestart = !!mcProcess;
+        if (needsRestart) {
+            emitConsoleSafe(`\n${COLORS.yellow}[SYSTEM]${COLORS.reset} Restart the server to load ${filename}\n`);
+        }
+        res.json({ success: true, name: filename, size, needsRestart });
     });
 });
 
@@ -1732,23 +2096,48 @@ app.get('/api/backups', (req, res) => {
     }
 });
 
-app.post('/api/backups/create', (req, res) => {
+function createBackupZip(callback) {
     const backupName = `backup-${Date.now()}.zip`;
     const backupPath = path.join(BACKUPS_DIR, backupName);
     const s = loadSettings();
     const worlds = (s.backupWorlds || 'world').split(',').map(w => w.trim()).filter(Boolean);
-    const args = ['-r', backupPath, ...worlds, 'plugins', 'server.properties'];
 
-    spawn('zip', args, {
+    // Only zip paths that actually exist — a brand-new server has no world/
+    // folder yet, and zip exits with "Nothing to do!" (code 12) when handed
+    // only missing inputs, which made backups fail mysteriously.
+    const targets = [];
+    for (const t of [...worlds, 'plugins', 'server.properties']) {
+        const safe = String(t).replace(/^\/+|\/+$/g, '').replace(/\/\//g, '/');
+        if (!safe || safe.includes('..')) continue;
+        if (fs.existsSync(path.join(SERVER_DIR, safe))) targets.push(safe);
+    }
+    if (targets.length === 0) {
+        return callback(new Error('Nothing to back up yet — no world folder or plugins found. Start the server once to generate a world.'));
+    }
+
+    const args = ['-r', backupPath, ...targets];
+
+    const child = spawn('zip', args, {
         cwd: SERVER_DIR,
         stdio: 'ignore'
-    }).on('close', (code) => {
+    });
+    child.on('error', (err) => {
+        callback(new Error(`Backup failed — the 'zip' utility is not installed on this system (${err.message})`));
+    });
+    child.on('close', (code) => {
         if (code === 0) {
             checkScheduledBackups(); // Prune excess after creation
-            res.json({ success: true, name: backupName });
+            callback(null, backupName);
         } else {
-            sendError(res, 'Backup failed', 500);
+            callback(new Error(`Backup failed (zip exit code ${code})`));
         }
+    });
+}
+
+app.post('/api/backups/create', (req, res) => {
+    createBackupZip((err, backupName) => {
+        if (err) return sendError(res, err.message, 500);
+        res.json({ success: true, name: backupName });
     });
 });
 
@@ -1802,150 +2191,450 @@ app.post('/api/crash-log/clear', (req, res) => {
 });
 
 // ================================================================
-// PHASE 14: GIT-BASED ATOMIC UPDATE ENGINE
+// PHASE 13b: SCHEDULED TASKS MODULE
+// Tasks live in config/tasks.json and run on a 30s heartbeat:
+//   command  -> send a console command to the running server
+//   restart  -> gracefully restart the server (if running)
+//   backup   -> create a zip backup of the configured worlds
 // ================================================================
 
-/**
- * Executes a git command and returns trimmed stdout.
- * Silently returns null on failure (no exceptions thrown).
- */
-function gitExec(args, options = {}) {
+const TASKS_DB_PATH = path.join(CONFIG_DIR, 'tasks.json');
+
+function loadTasks() {
     try {
-        const result = require('child_process').execFileSync('git', args, {
-            cwd: ROOT_DIR,
-            encoding: 'utf8',
-            timeout: 15000,
-            stdio: ['ignore', 'pipe', 'pipe'],
-            ...options
+        if (fs.existsSync(TASKS_DB_PATH)) {
+            const parsed = JSON.parse(fs.readFileSync(TASKS_DB_PATH, 'utf8'));
+            if (Array.isArray(parsed)) return parsed;
+        }
+    } catch (err) {
+        log(`Failed to load tasks: ${err.message}`, 'warn');
+    }
+    return [];
+}
+
+function saveTasks(tasks) {
+    try {
+        ensureDirectories();
+        fs.writeFileSync(TASKS_DB_PATH, JSON.stringify(tasks, null, 2), 'utf8');
+        return true;
+    } catch (err) {
+        log(`Failed to save tasks: ${err.message}`, 'error');
+        return false;
+    }
+}
+
+app.get('/api/tasks', (req, res) => {
+    res.json({ success: true, tasks: loadTasks() });
+});
+
+app.post('/api/tasks', (req, res) => {
+    const { name, type, command, intervalMinutes, enabled } = req.body;
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+        return sendError(res, 'Task name is required');
+    }
+    if (!['command', 'restart', 'backup'].includes(type)) {
+        return sendError(res, 'Invalid task type');
+    }
+    const interval = parseInt(intervalMinutes, 10);
+    if (isNaN(interval) || interval < 1 || interval > 24 * 60) {
+        return sendError(res, 'Interval must be between 1 and 1440 minutes');
+    }
+    if (type === 'command' && (!command || !command.trim())) {
+        return sendError(res, 'Command is required for command tasks');
+    }
+
+    const tasks = loadTasks();
+    const task = {
+        id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        name: name.trim().slice(0, 100),
+        type,
+        command: type === 'command' ? command.trim().slice(0, 500) : '',
+        intervalMinutes: interval,
+        enabled: enabled !== false,
+        lastRun: null,
+        createdAt: new Date().toISOString()
+    };
+    tasks.push(task);
+    if (!saveTasks(tasks)) return sendError(res, 'Failed to save task', 500);
+
+    log(`Task created: ${task.name} (${type} every ${interval}min)`, 'info');
+    res.json({ success: true, task });
+});
+
+app.delete('/api/tasks/:id', (req, res) => {
+    const tasks = loadTasks();
+    const idx = tasks.findIndex(t => t.id === req.params.id);
+    if (idx === -1) return sendError(res, 'Task not found', 404);
+    tasks.splice(idx, 1);
+    if (!saveTasks(tasks)) return sendError(res, 'Failed to save tasks', 500);
+    res.json({ success: true });
+});
+
+app.post('/api/tasks/:id/toggle', (req, res) => {
+    const tasks = loadTasks();
+    const task = tasks.find(t => t.id === req.params.id);
+    if (!task) return sendError(res, 'Task not found', 404);
+    task.enabled = !task.enabled;
+    if (!saveTasks(tasks)) return sendError(res, 'Failed to save tasks', 500);
+    res.json({ success: true, enabled: task.enabled });
+});
+
+function runTask(task) {
+    if (task.type === 'command') {
+        const result = sendCommand(task.command);
+        log(`[Task] Ran command "${task.command}" — ${result.success ? 'ok' : result.error}`, 'info');
+    } else if (task.type === 'restart') {
+        if (mcProcess) {
+            restartServer();
+            log('[Task] Scheduled restart triggered', 'warn');
+        } else {
+            log('[Task] Restart skipped — server not running', 'warn');
+        }
+    } else if (task.type === 'backup') {
+        createBackupZip((err, backupName) => {
+            log(`[Task] Scheduled backup ${err ? 'failed: ' + err.message : 'completed: ' + backupName}`, err ? 'error' : 'info');
+            emitConsoleSafe(`\n${COLORS.cyan}[TASK]${COLORS.reset} Scheduled backup ${err ? 'failed' : 'completed: ' + backupName}\n`);
         });
-        return (result.stdout || result).toString().trim();
-    } catch {
+    }
+}
+
+// Task heartbeat — check every 30 seconds for due tasks.
+setInterval(() => {
+    const tasks = loadTasks();
+    const now = Date.now();
+    let changed = false;
+    for (const task of tasks) {
+        if (!task.enabled) continue;
+        const intervalMs = (task.intervalMinutes || 0) * 60 * 1000;
+        if (intervalMs <= 0) continue;
+        const lastRun = task.lastRun ? new Date(task.lastRun).getTime() : 0;
+        if (now - lastRun >= intervalMs) {
+            task.lastRun = new Date().toISOString();
+            changed = true;
+            try {
+                if (io && io.engine && io.engine.clientsCount > 0) {
+                    io.emit('task-ran', { id: task.id, name: task.name, type: task.type });
+                }
+            } catch {}
+            runTask(task);
+        }
+    }
+    if (changed) saveTasks(tasks);
+}, 30000);
+
+// ================================================================
+// PHASE 14: GITHUB UPDATE ENGINE (version.json driven)
+// The panel updates itself by downloading the latest source archive
+// from GitHub. Version comparison uses version.json — the same file
+// lives in this install and at the repository root — so updates work
+// with or without a local git clone.
+// ================================================================
+
+const UPDATE_CHECK_TTL = 5 * 60 * 1000; // re-query GitHub at most every 5 min
+let updateCheckCache = null;
+let lastKnownBranch = null;
+
+// Directories/files the updater must never touch.
+const UPDATE_PROTECTED = new Set(['.git', 'node_modules', 'server', 'config', 'backups', 'uploads', '.env']);
+
+function rawVersionUrl(branch) {
+    if (UPDATE_RAW_URL) return UPDATE_RAW_URL;
+    return `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${branch}/version.json`;
+}
+
+function archiveUrl(branch) {
+    if (UPDATE_ARCHIVE_URL) return UPDATE_ARCHIVE_URL;
+    return `https://codeload.github.com/${GITHUB_OWNER}/${GITHUB_REPO}/tar.gz/refs/heads/${branch}`;
+}
+
+function normalizeVersion(v) {
+    const s = String(v || '').trim().replace(/^v/i, '');
+    return s || null;
+}
+
+/** Numeric dotted comparison (1.0.10 > 1.0.9). Returns -1 | 0 | 1. */
+function compareVersions(a, b) {
+    const pa = normalizeVersion(a) ? normalizeVersion(a).split('.').map(n => parseInt(n, 10) || 0) : [0];
+    const pb = normalizeVersion(b) ? normalizeVersion(b).split('.').map(n => parseInt(n, 10) || 0) : [0];
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+        const x = pa[i] || 0;
+        const y = pb[i] || 0;
+        if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+}
+
+function parseVersionJson(text) {
+    // Handles both raw file strings and already-parsed objects
+    // (axios auto-JSON-parses its responses).
+    try {
+        const data = (typeof text === 'object' && text !== null) ? text : JSON.parse(text);
+        const v = normalizeVersion(data && (data.version || data.latest || data.build));
+        if (v) return v;
+    } catch { /* fall through to the regex */ }
+    if (typeof text === 'object') return null;
+    const m = String(text || '').match(/(\d+(?:\.\d+){1,3})/);
+    return m ? m[1] : null;
+}
+
+/** The version of this install: version.json → package.json → hardcoded fallback. */
+function getLocalVersion() {
+    try {
+        if (fs.existsSync(VERSION_FILE)) {
+            const v = parseVersionJson(fs.readFileSync(VERSION_FILE, 'utf8'));
+            if (v) return v;
+        }
+        const pkg = require(path.join(ROOT_DIR, 'package.json'));
+        if (pkg && pkg.version) {
+            const v = normalizeVersion(pkg.version);
+            if (v) return v;
+        }
+    } catch { /* ignore */ }
+    return CURRENT_VERSION;
+}
+
+function emitUpdateEvent(level, text) {
+    try {
+        io.emit('update-progress', { text, level, timestamp: new Date().toISOString() });
+    } catch { /* ignore */ }
+}
+
+/** Fetches { version, branch } for one branch, or null when unreachable/404. */
+async function fetchRemoteVersion(branch) {
+    try {
+        const res = await axios.get(rawVersionUrl(branch), {
+            headers: { 'User-Agent': USER_AGENT },
+            timeout: 10000,
+            validateStatus: s => s >= 200 && s < 300
+        });
+        const version = parseVersionJson(res.data);
+        return version ? { version, branch } : null;
+    } catch (err) {
+        log(`fetchRemoteVersion(${branch}) failed: ${err.message}`, 'warn');
         return null;
     }
 }
 
+/** Resolves the live remote version (last-known branch, then main, then master). */
+async function resolveRemoteVersion() {
+    const candidates = [];
+    if (lastKnownBranch) candidates.push(lastKnownBranch);
+    for (const b of [GITHUB_BRANCH, 'master']) {
+        if (!candidates.includes(b)) candidates.push(b);
+    }
+    for (const branch of candidates) {
+        const remote = await fetchRemoteVersion(branch);
+        if (remote) {
+            lastKnownBranch = branch;
+            return remote;
+        }
+    }
+    return null;
+}
+
 app.get('/api/update/check', async (req, res) => {
     try {
-        log('Checking for Git updates...', 'info');
-
-        // Get current version tag from local git history
-        const currentTag = gitExec(['describe', '--tags', '--abbrev=0']) || CURRENT_VERSION;
-        const currentVersion = currentTag.replace(/^v/, '');
-
-        // Get latest remote tag without cloning
-        const remoteRefs = gitExec(['ls-remote', '--tags', '--sort=-v:refname', GIT_REMOTE_URL]);
-        let latestTag = null;
-
-        if (remoteRefs) {
-            // Parse the last line of `--tags --sort=-v:refname` which gives the newest tag
-            const tagLines = remoteRefs.split('\n').filter(l => l.trim());
-            for (const line of tagLines.reverse()) {
-                const parts = line.trim().split(/\s+/);
-                if (parts.length >= 2) {
-                    const ref = parts[1];
-                    // Filter out ^{} dereference annotations
-                    const cleanRef = ref.replace(/\^\{\}$/, '');
-                    if (cleanRef.startsWith('refs/tags/')) {
-                        const tag = cleanRef.replace('refs/tags/', '');
-                        if (/^v?\d+\.\d+\.\d+/.test(tag)) {
-                            latestTag = tag;
-                            break;
-                        }
-                    }
-                }
-            }
+        const now = Date.now();
+        if (updateCheckCache && now - updateCheckCache.at < UPDATE_CHECK_TTL) {
+            return res.json({ ...updateCheckCache.payload, fromCache: true });
         }
 
-        if (!latestTag) {
-            log('Could not determine latest remote tag from git', 'warn');
-            return res.json({
-                updateAvailable: false,
-                currentVersion,
-                latestVersion: currentVersion,
-                gitRepoUrl: GIT_REMOTE_URL,
-                method: 'git_sync'
-            });
-        }
+        const currentVersion = getLocalVersion();
+        const remote = await resolveRemoteVersion();
+        const newer = remote ? compareVersions(remote.version, currentVersion) : 0;
 
-        const latestVersion = latestTag.replace(/^v/, '');
-        const updateAvailable = latestVersion !== currentVersion;
-
-        res.json({
-            updateAvailable,
-            currentVersion,
-            latestVersion,
+        const payload = {
+            method: 'github',
+            source: 'version.json',
             gitRepoUrl: GIT_REMOTE_URL,
-            method: 'git_sync'
-        });
+            branch: remote ? remote.branch : (lastKnownBranch || GITHUB_BRANCH),
+            checkedAt: new Date().toISOString(),
+            currentVersion,
+            latestVersion: remote ? remote.version : currentVersion,
+            updateAvailable: newer > 0,
+            checkBlocked: !remote,
+            message: !remote
+                ? 'Could not fetch version.json from the GitHub repository. Push version.json to the repo (main or master) and make sure the panel can reach the network.'
+                : (newer === 0
+                    ? `This install matches the repository (v${currentVersion}).`
+                    : (newer < 0
+                        ? `The repository is at v${remote.version} — older than this install (v${currentVersion}). No downgrade performed.`
+                        : `A newer release (v${remote.version}) is available on GitHub.`))
+        };
+        updateCheckCache = { at: now, payload };
+        res.json(payload);
     } catch (err) {
         log(`Update check failed: ${err.message}`, 'error');
         res.status(500).json({
-            error: 'Failed to check for updates via git',
-            currentVersion: CURRENT_VERSION,
-            gitRepoUrl: GIT_REMOTE_URL,
-            method: 'git_sync'
+            error: 'Failed to check for updates on GitHub',
+            method: 'github',
+            source: 'version.json',
+            currentVersion: getLocalVersion(),
+            gitRepoUrl: GIT_REMOTE_URL
         });
     }
 });
 
 app.post('/api/update/install', (req, res) => {
     if (isUpdateRunning) {
-        return res.status(409).json({ error: 'Git sync is already running. Please wait.' });
+        return res.status(409).json({ error: 'An update is already running. Please wait.' });
     }
 
-    if (!fs.existsSync(UPDATE_SCRIPT)) {
-        log(`Update script not found at: ${UPDATE_SCRIPT}`, 'error');
-        return res.status(500).json({ error: 'Update script not found on server. Contact support.' });
-    }
+    // Respond immediately; the async runner streams progress over Socket.io.
+    res.json({ success: true, status: 'github_update_initiated', method: 'github', source: 'version.json' });
 
-    log('Git sync triggered via update.sh', 'info');
-
-    // Respond to client immediately — do NOT fetch any external JSON/GitHub URLs
-    res.json({ success: true, status: 'git_sync_initiated' });
-
+    // Drop the cached check result so the next check reflects the installed version.
+    updateCheckCache = null;
     isUpdateRunning = true;
-
-    // Spawn update.sh as detached subprocess with ROOT_DIR as TARGET_DIR
-    const updater = spawn('/bin/bash', ['./update.sh'], {
-        cwd: ROOT_DIR,
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, TARGET_DIR: ROOT_DIR }
-    });
-
-    updater.unref();
-
-    log('Update subprocess spawned (detached mode)', 'info');
-
-    // Broadcast stdout lines to all web panel clients
-    updater.stdout.on('data', (chunk) => {
-        const dataString = chunk.toString('utf8');
-        io.emit('update-progress', dataString);
-    });
-
-    // Broadcast stderr lines to all web panel clients
-    updater.stderr.on('data', (chunk) => {
-        const dataString = chunk.toString('utf8');
-        io.emit('update-progress', dataString);
-    });
-
-    updater.on('error', (err) => {
-        isUpdateRunning = false;
-        log(`Update subprocess error: ${err.message}`, 'error');
-        io.emit('update-progress', `[GIT ERROR] ${err.message}\n`);
-    });
-
-    updater.on('close', (code) => {
-        isUpdateRunning = false;
-        if (code === 0) {
-            log('Git sync completed successfully (exit code 0)', 'info');
-            io.emit('update-progress', `[GIT SUCCESS] Deployment completed successfully.\n`);
-        } else {
-            log(`Git sync finished with non-zero exit code: ${code}`, 'error');
-            io.emit('update-progress', `[GIT ERROR] Deployment failed with exit code ${code}.\n`);
-        }
-    });
+    log('GitHub update initiated (version.json source)', 'info');
+    runGithubUpdate()
+        .catch(err => {
+            log(`Update failed: ${err.message}`, 'error');
+            emitUpdateEvent('error', `[GIT ERROR] ${err.message}`);
+            try { io.emit('update-complete', { success: false, message: err.message }); } catch { /* ignore */ }
+        })
+        .finally(() => {
+            isUpdateRunning = false;
+        });
 });
+
+function extractTarGz(archivePath, destDir) {
+    return new Promise((resolve, reject) => {
+        const child = spawn('tar', ['-xzf', archivePath, '-C', destDir], { stdio: 'ignore' });
+        child.on('error', () => reject(new Error('tar could not be started — this system needs the tar utility to install updates.')));
+        child.on('close', code => code === 0 ? resolve() : reject(new Error(`Archive extraction failed (tar exit code ${code}).`)));
+    });
+}
+
+function findStagedRoot(stageDir) {
+    try {
+        for (const entry of fs.readdirSync(stageDir)) {
+            const p = path.join(stageDir, entry);
+            if (!fs.statSync(p).isDirectory()) continue;
+            if (fs.existsSync(path.join(p, 'app.js')) && fs.existsSync(path.join(p, 'package.json'))) return p;
+        }
+    } catch { /* fall through */ }
+    return null;
+}
+
+function filesDiffer(aPath, bPath) {
+    try {
+        return fs.readFileSync(aPath, 'utf8') !== fs.readFileSync(bPath, 'utf8');
+    } catch {
+        return true;
+    }
+}
+
+function runNpmInstall() {
+    return new Promise((resolve, reject) => {
+        const child = spawn('npm', ['install', '--no-audit', '--no-fund'], {
+            cwd: ROOT_DIR,
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        let tail = '';
+        child.stdout.on('data', c => { tail = (tail + c.toString()).slice(-400); });
+        child.stderr.on('data', c => { tail = (tail + c.toString()).slice(-400); });
+        child.on('error', () => reject(new Error('npm could not be started while installing dependencies.')));
+        child.on('close', code => code === 0 ? resolve() : reject(new Error(`npm install failed (exit code ${code}). ${tail.split('\n').slice(-3).join(' ')}`)));
+    });
+}
+
+function restartPanel() {
+    return new Promise(resolve => {
+        if (process.env.pm_id !== undefined || process.env.PM2_HOME) {
+            // Under PM2 a clean exit makes the process manager bring the new code back up.
+            log('Panel runs under PM2 — exiting for automatic restart with the new version', 'info');
+            setTimeout(() => process.exit(0), 1500);
+            return resolve(true);
+        }
+        const child = spawn('pm2', ['restart', 'purple-mc-panel'], { stdio: 'ignore' });
+        child.on('error', () => resolve(false));
+        child.on('close', code => resolve(code === 0));
+    });
+}
+
+async function runGithubUpdate() {
+    const stageBase = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-update-'));
+    const archivePath = path.join(stageBase, 'source.tar.gz');
+
+    try {
+        // ── 1 · resolve remote version from version.json ────────────────
+        emitUpdateEvent('system', '[STEP 1] Checking version.json against the GitHub repository...');
+        const remote = await resolveRemoteVersion();
+        if (!remote) throw new Error('Could not fetch version.json from GitHub — the update was not installed.');
+        const currentVersion = getLocalVersion();
+        const cmp = compareVersions(remote.version, currentVersion);
+        if (cmp === 0) throw new Error(`No newer version available — the repository is at v${remote.version}, same as this install.`);
+        if (cmp < 0) throw new Error(`Repository version v${remote.version} is older than this install (v${currentVersion}). Refusing to downgrade.`);
+        emitUpdateEvent('info', `[STEP 1] v${currentVersion} → v${remote.version} on branch ${remote.branch} — updating.`);
+
+        // ── 2 · download the source archive ─────────────────────────────
+        emitUpdateEvent('system', '[STEP 2] Downloading the latest source from GitHub...');
+        let lastProgress = 0;
+        await downloadFile(archiveUrl(remote.branch), archivePath, (got, total) => {
+            const now = Date.now();
+            if (now - lastProgress < 1000) return;
+            lastProgress = now;
+            const pct = total > 0 ? Math.round((got / total) * 100) : Math.round(got / 1024);
+            emitUpdateEvent('info', `[STEP 2] ${total > 0 ? pct + '%' : got + ' bytes downloaded'}`);
+        });
+
+        // ── 3 · extract and validate ────────────────────────────────────
+        emitUpdateEvent('system', '[STEP 3] Extracting and validating the archive...');
+        await extractTarGz(archivePath, stageBase);
+        const stageRoot = findStagedRoot(stageBase);
+        if (!stageRoot) throw new Error('Downloaded archive does not look like the panel source (version.json / app.js / package.json missing). Nothing was changed.');
+        const stagedVersion = parseVersionJson(fs.readFileSync(path.join(stageRoot, 'version.json'), 'utf8')) || remote.version;
+        emitUpdateEvent('info', `[STEP 3] Archive verified — staged version ${stagedVersion}.`);
+
+        // ── 4 · install new files, preserving runtime data ──────────────
+        emitUpdateEvent('system', '[STEP 4] Installing new files (server/, config/, backups/, node_modules/ are preserved)...');
+        const stagedEntries = new Set(fs.readdirSync(stageRoot));
+        for (const entry of stagedEntries) {
+            if (UPDATE_PROTECTED.has(entry)) continue;
+            const src = path.join(stageRoot, entry);
+            const dst = path.join(ROOT_DIR, entry);
+            fs.rmSync(dst, { recursive: true, force: true });
+            fs.cpSync(src, dst, { recursive: true });
+        }
+        // Remove top-level files/dirs that no longer exist in the new release.
+        for (const entry of fs.readdirSync(ROOT_DIR)) {
+            if (UPDATE_PROTECTED.has(entry) || stagedEntries.has(entry)) continue;
+            emitUpdateEvent('warn', `[STEP 4] Removing obsolete file: ${entry}`);
+            fs.rmSync(path.join(ROOT_DIR, entry), { recursive: true, force: true });
+        }
+        fs.writeFileSync(VERSION_FILE, JSON.stringify({ version: stagedVersion }, null, 2) + '\n');
+        emitUpdateEvent('success', `[STEP 4] New files installed — version.json now reports v${stagedVersion}.`);
+
+        // ── 5 · dependencies (only when package files changed) ──────────
+        if (filesDiffer(path.join(ROOT_DIR, 'package.json'), path.join(stageRoot, 'package.json'))) {
+            emitUpdateEvent('system', '[STEP 5] Package files changed — installing dependencies (can take a minute)...');
+            await runNpmInstall();
+        } else {
+            emitUpdateEvent('info', '[STEP 5] Dependencies unchanged — skipping npm install.');
+        }
+        try { fs.chmodSync(path.join(ROOT_DIR, 'update.sh'), 0o755); } catch { /* ignore */ }
+        try { if (fs.existsSync(path.join(ROOT_DIR, 'install.sh'))) fs.chmodSync(path.join(ROOT_DIR, 'install.sh'), 0o755); } catch { /* ignore */ }
+
+        // ── 6 · restart the panel ────────────────────────────────────────
+        emitUpdateEvent('system', '[STEP 6] Restarting the panel to load the new version...');
+        const restarted = await restartPanel();
+        const doneMsg = `Update applied — now running v${stagedVersion}.`;
+        emitUpdateEvent('success', '[GIT SUCCESS] ' + doneMsg);
+        try {
+            io.emit('update-complete', {
+                success: true,
+                message: restarted
+                    ? doneMsg + ' The panel is restarting.'
+                    : doneMsg + ' Restart the panel process (pm2 restart purple-mc-panel) to finish.'
+            });
+        } catch { /* ignore */ }
+    } finally {
+        try { fs.rmSync(stageBase, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+}
 
 // ================================================================
 // PHASE 15: SYSTEM INFO & RESOURCE DETECTION
@@ -2099,7 +2788,17 @@ setInterval(checkScheduledBackups, 30 * 60 * 1000);
 
 async function init() {
     ensureDirectories();
-    await checkAndDownloadServer();
+
+    // Kick off a background server-JAR download (if one is needed) so the
+    // panel comes up instantly and is never blocked on the network.
+    // startServer() also awaits checkAndDownloadServer() before spawning.
+    checkAndDownloadServer().then(
+        () => log('Server JAR ready', 'info'),
+        (err) => {
+            log(`Server JAR unavailable: ${err.message}`, 'error');
+            log('Place a server.jar in the server/ directory to start the Minecraft server.', 'warn');
+        }
+    );
 
     server.on('error', (err) => {
         if (err.code === 'EADDRINUSE') {
