@@ -1,4 +1,5 @@
 node_modules/
+dist/
 server/
 backups/
 uploads/
@@ -8,3 +9,4 @@ uploads/
 *.zip
 config.json
 config/
+.freebuff/
