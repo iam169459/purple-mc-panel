@@ -12,7 +12,7 @@ Built with **Node.js**, **Express**, **Socket.IO**, and a single-page frontend. 
 - Live status, player, CPU, RAM, TPS and uptime cards with a holographic HUD look
 - Circular SVG gauges with glow, animated CPU/RAM/TPS sparkline history
 - Telemetry ticker, reactor-core status indicator and subsystem LEDs
-- Storage breakdown per folder, backups panel, and quick actions (broadcast, save-all, check TPS)
+- Storage breakdown per folder (click any folder to open it in the File Explorer), backups panel, and quick actions (broadcast, save-all, check TPS)
 
 ### 💬 Live Console
 - Real-time streaming terminal over Socket.IO (color-coded log types)
@@ -22,7 +22,10 @@ Built with **Node.js**, **Express**, **Socket.IO**, and a single-page frontend. 
 
 ### 🗂️ File Manager
 - Browse and edit server files in a built-in code editor (text files only)
-- Create folders/files, upload files to any folder, download anything, delete with confirmation
+- Create folders/files, upload to any folder, rename, delete with confirmation
+- **Storage-aware browsing**: folders show their real recursive size (and file count on hover), sort the list by name or size, and a storage bar shows how much of the host disk the server uses
+- Download single files or **any folder as a `.zip`** (worlds, plugins/, logs/ — streamed, no temp copy on disk)
+- One-click jumps to every top-level folder — all worlds, plugins, config, logs, crash-reports, datapacks and more — so every in-game file is reachable in two clicks
 
 ### 🧩 Marketplace & Plugins
 - Search Modrinth for Paper-compatible plugins right from the panel
@@ -72,7 +75,9 @@ Built with **Node.js**, **Express**, **Socket.IO**, and a single-page frontend. 
 curl -fsSL https://raw.githubusercontent.com/iam169459/purple-mc-panel/main/install.sh | sudo bash
 ```
 
-Useful flags: `--port 8080`, `--pm2-name my-panel`, `--no-pm2`. Installs Node 20 if missing, sets up PM2 as `purple-mc-panel`, and writes a `.env` with your chosen port.
+Useful flags: `--port 8080`, `--pm2-name my-panel`, `--no-pm2`, `--no-autostart`. Installs Node 20 if missing, sets up PM2 as `purple-mc-panel`, and writes a `.env` with your chosen port.
+
+The installer also makes everything **come back on its own after a reboot or power cut**: it registers PM2 with the init system (`pm2 startup` + `pm2 save`, so the panel starts when the machine powers on, and crashes auto-restart with back-off) and enables the Minecraft server's auto-start so it launches with the panel. Skip that behaviour with `--no-autostart`, or toggle the Minecraft auto-start later in the panel's Settings.
 
 ### Option B — Manual (any OS)
 

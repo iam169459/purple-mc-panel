@@ -1137,14 +1137,27 @@
                         <span id="fm-filter-count" class="text-[10px] text-zinc-700"></span>
                     </div>
 
+                    <!-- Storage Status + Quick Jump -->
+                    <div class="flex items-center gap-4 px-5 py-2 bg-zinc-950/30 border-b border-zinc-800/40 text-[11px] flex-wrap">
+                        <div class="flex items-center gap-2.5 min-w-[250px] max-w-md flex-1" title="Server files vs. free space on this disk">
+                            <i class="fa-solid fa-hard-drive text-emerald-400/90 text-xs"></i>
+                            <div class="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                                <div id="fm-storage-bar" class="h-full rounded-full bg-gradient-to-r from-emerald-500/80 to-cyan-500/70 transition-all duration-700" style="width:0%"></div>
+                            </div>
+                            <span id="fm-storage-label" class="text-zinc-600 font-mono whitespace-nowrap">Scanning&hellip;</span>
+                        </div>
+                        <span class="text-zinc-700 uppercase tracking-widest font-semibold text-[9px] hidden sm:inline">Jump to</span>
+                        <div id="fm-quick-dirs" class="flex items-center gap-1.5 flex-wrap"></div>
+                    </div>
+
                     <!-- File Table -->
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead>
                                 <tr class="border-b border-zinc-800/40 bg-zinc-900/20">
-                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-5">Name</th>
+                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-5 cursor-pointer select-none hover:text-zinc-300 transition" onclick="fmToggleSort('name')" title="Sort by name">Name <span id="fm-sort-name" class="text-[9px] text-purple-400"></span></th>
                                     <th class="text-left text-zinc-500 font-medium py-3.5 px-4">Type</th>
-                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-4">Size</th>
+                                    <th class="text-left text-zinc-500 font-medium py-3.5 px-4 cursor-pointer select-none hover:text-zinc-300 transition" onclick="fmToggleSort('size')" title="Sort by size (biggest first)">Size <span id="fm-sort-size" class="text-[9px] text-purple-400"></span></th>
                                     <th class="text-left text-zinc-500 font-medium py-3.5 px-4">Modified</th>
                                     <th class="text-left text-zinc-500 font-medium py-3.5 px-4">Actions</th>
                                 </tr>
@@ -2745,8 +2758,9 @@
                 let html = '';
                 for (const f of folders) {
                     const pct = Math.max(2, Math.round((f.totalBytes / maxBytes) * 100));
+                    const safeName = String(f.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                     html += '<div class="flex items-center gap-3 text-xs">' +
-                        '<span class="text-zinc-400 w-28 truncate">' + f.name + '</span>' +
+                        '<span class="text-zinc-400 hover:text-purple-300 cursor-pointer w-28 truncate" title="Open in File Explorer" onclick="openFmFolder(\'' + safeName + '\')">' + f.name + '</span>' +
                         '<div class="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-cyan-500/70 to-purple-500/70" style="width:' + pct + '%"></div></div>' +
                         '<span class="text-zinc-500 font-mono w-16 text-right">' + f.totalMB.toFixed(1) + ' MB</span>' +
                     '</div>';
@@ -3662,9 +3676,13 @@
                 case 'tasks':
                     loadTasks();
                     break;
-                case 'files':
-                    loadFileManager('/api/files/list?path=/', '/');
+                case 'files': {
+                    const pendingPath = window._pendingFmPath || '/';
+                    window._pendingFmPath = null;
+                    loadFileManager('/api/files/list?path=' + encodeURIComponent(pendingPath), pendingPath);
+                    loadFmStorage();
                     break;
+                }
                 case 'marketplace':
                     loadEssentialPlugins();
                     loadInstalledPlugins();
@@ -3693,6 +3711,8 @@
         let currentFmPath = '/';
         let currentFmFiles = null;
         let editorFilePath = null;
+        let fmSortMode = 'name';
+        let fmSortDesc = false;
 
         async function loadFileManager(url, basePath) {
             currentFmPath = basePath;
@@ -3738,7 +3758,9 @@
             const q = (document.getElementById('fm-search') ? document.getElementById('fm-search').value.trim().toLowerCase() : '');
             let visible = currentFmFiles;
             if (q) visible = visible.filter(function(f) { return f.name.toLowerCase().indexOf(q) !== -1; });
+            visible = fmSortList(visible);
 
+            updateFmSortIcons();
             const countEl = document.getElementById('fm-filter-count');
             if (countEl) countEl.textContent = q ? visible.length + ' of ' + currentFmFiles.length + ' items' : currentFmFiles.length + ' items';
 
@@ -3750,14 +3772,18 @@
             let html = '';
             for (let i = 0; i < visible.length; i++) {
                 const f = visible[i];
-                const size = f.isDirectory ? '\u2014' : formatBytes(f.size);
+                const isCritical = f.name === 'server.jar' || f.name === 'eula.txt';
+                const size = formatBytes(f.size || 0);
                 const modTime = f.modified ? new Date(f.modified).toLocaleString() : '\u2014';
                 const icon = f.isDirectory ? 'fa-folder text-yellow-400' : getFileIcon(f.extension);
                 const canEdit = !f.isDirectory && isEditableExt(f.extension);
                 const nameEsc = f.name.replace(/'/g, "\\'");
                 const editBtn = canEdit ? '<button onclick="fmOpenFile(\'' + nameEsc + '\')" class="text-purple-400 hover:text-purple-300 text-xs mx-1" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>' : '';
-                const dlBtn = !f.isDirectory ? '<button onclick="fmDownload(\'' + nameEsc + '\')" class="text-emerald-500 hover:text-emerald-400 text-xs mx-1" title="Download"><i class="fa-solid fa-download"></i></button>' : '';
-                const delBtn = (f.name !== 'server.jar' && f.name !== 'eula.txt') ? '<button onclick="fmDelete(\'' + nameEsc + '\')" class="text-red-500 hover:text-red-400 text-xs mx-1" title="Delete"><i class="fa-solid fa-trash-can"></i></button>' : '';
+                const renBtn = !isCritical ? '<button onclick="fmRename(\'' + nameEsc + '\')" class="text-sky-400 hover:text-sky-300 text-xs mx-1" title="Rename"><i class="fa-solid fa-pen"></i></button>' : '';
+                const dlBtn = f.isDirectory
+                    ? '<button onclick="fmDownloadDir(\'' + nameEsc + '\')" class="text-emerald-500 hover:text-emerald-400 text-xs mx-1" title="Download folder as .zip"><i class="fa-solid fa-file-zipper"></i></button>'
+                    : '<button onclick="fmDownload(\'' + nameEsc + '\')" class="text-emerald-500 hover:text-emerald-400 text-xs mx-1" title="Download"><i class="fa-solid fa-download"></i></button>';
+                const delBtn = !isCritical ? '<button onclick="fmDelete(\'' + nameEsc + '\')" class="text-red-500 hover:text-red-400 text-xs mx-1" title="Delete"><i class="fa-solid fa-trash-can"></i></button>' : '';
                 const clickAction = f.isDirectory ? 'fmNavigateInto(\'' + nameEsc + '\')' : 'fmOpenFile(\'' + nameEsc + '\')';
 
                 html += '<tr class="file-row border-b border-zinc-800/20">' +
@@ -3768,9 +3794,9 @@
                         '</div>' +
                     '</td>' +
                     '<td class="py-2.5 px-4 text-zinc-600 text-xs uppercase">' + (f.isDirectory ? 'Folder' : (f.extension.replace('.', '') || 'file')) + '</td>' +
-                    '<td class="py-2.5 px-4 text-zinc-600 text-xs font-mono">' + size + '</td>' +
+                    '<td class="py-2.5 px-4 text-zinc-600 text-xs font-mono" title="' + (f.isDirectory && f.fileCount ? f.fileCount + ' files inside' : '') + '">' + size + '</td>' +
                     '<td class="py-2.5 px-4 text-zinc-600 text-xs">' + modTime + '</td>' +
-                    '<td class="py-2.5 px-4">' + editBtn + dlBtn + delBtn + '</td>' +
+                    '<td class="py-2.5 px-4">' + editBtn + renBtn + dlBtn + delBtn + '</td>' +
                 '</tr>';
             }
             listEl.innerHTML = html;
@@ -3778,6 +3804,95 @@
 
         function applyFmFilter() {
             if (currentFmFiles) renderFmFileList(currentFmFiles);
+        }
+
+        function fmToggleSort(mode) {
+            if (fmSortMode === mode) {
+                fmSortDesc = !fmSortDesc;
+            } else {
+                fmSortMode = mode;
+                fmSortDesc = (mode === 'size'); // size defaults to biggest-first
+            }
+            renderFmFileList(currentFmFiles);
+        }
+
+        function fmSortList(items) {
+            const list = items.slice();
+            if (fmSortMode === 'size') {
+                list.sort(function(a, b) { return (b.size || 0) - (a.size || 0); });
+                if (!fmSortDesc) list.reverse();
+            } else {
+                list.sort(function(a, b) {
+                    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+                    return a.name.localeCompare(b.name);
+                });
+                if (fmSortDesc) list.reverse();
+            }
+            return list;
+        }
+
+        function updateFmSortIcons() {
+            const set = function(id, active) {
+                const el = document.getElementById(id);
+                if (el) el.textContent = active ? (fmSortDesc ? '\u25be' : '\u25b4') : '';
+            };
+            set('fm-sort-name', fmSortMode === 'name');
+            set('fm-sort-size', fmSortMode === 'size');
+        }
+
+        // Storage header: server usage vs. host free space + one-click
+        // jumps into every top-level folder (worlds, plugins, logs, ...).
+        async function loadFmStorage() {
+            const bar = document.getElementById('fm-storage-bar');
+            const label = document.getElementById('fm-storage-label');
+            const chipsEl = document.getElementById('fm-quick-dirs');
+            try {
+                const res = await fetch('/api/files/storage');
+                const data = await res.json();
+                if (!data || !data.success) return;
+
+                if (bar && label && data.server) {
+                    const used = data.server.totalBytes || 0;
+                    const host = data.host;
+                    let pct = 0;
+                    if (host && host.totalBytes > 0) pct = Math.min(100, Math.round((used / host.totalBytes) * 100));
+                    bar.style.width = pct + '%';
+                    label.textContent = host
+                        ? 'server ' + formatBytes(used) + ' \u00b7 ' + formatBytes(host.freeBytes) + ' free'
+                        : 'server ' + formatBytes(used);
+                    label.title = host ? 'Disk: ' + formatBytes(host.freeBytes) + ' free of ' + formatBytes(host.totalBytes) : '';
+                } else if (label) {
+                    label.textContent = '\u2014';
+                }
+
+                if (chipsEl) {
+                    chipsEl.innerHTML = '';
+                    const addChip = function(text, title, fn) {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md bg-zinc-900/70 border border-zinc-800/70 text-zinc-400 hover:text-purple-300 hover:border-purple-500/40 transition cursor-pointer';
+                        btn.title = title || text;
+                        btn.innerHTML = '<i class="fa-solid fa-folder text-[9px] text-yellow-500/70"></i><span></span>';
+                        btn.lastChild.textContent = text;
+                        btn.addEventListener('click', fn);
+                        chipsEl.appendChild(btn);
+                    };
+                    addChip('All files', 'Browse the whole server directory', function() { fmNavigateTo('/'); });
+                    (data.folders || []).forEach(function(folder) {
+                        if (!folder || !folder.name) return;
+                        const title = folder.name + ' \u00b7 ' + formatBytes(folder.totalBytes || 0) + (folder.fileCount ? ' \u00b7 ' + folder.fileCount + ' files' : '');
+                        addChip(folder.name, title, function() { fmNavigateTo('/' + folder.name); });
+                    });
+                }
+            } catch (e) {
+                if (label) label.textContent = '\u2014';
+            }
+        }
+
+        // Deep-link from dashboard cards straight into a folder.
+        function openFmFolder(folderName) {
+            if (folderName && folderName !== '/') window._pendingFmPath = '/' + folderName;
+            showView('files');
         }
 
         async function fmUploadFile(input) {
@@ -3794,6 +3909,7 @@
                 if (data.success) {
                     showToast('Uploaded ' + data.name, 'success');
                     loadFileManager('/api/files/list?path=' + encodeURIComponent(currentFmPath), currentFmPath);
+                    loadFmStorage();
                 } else {
                     showToast(data.error || 'Upload failed', 'error');
                 }
@@ -3811,6 +3927,45 @@
             document.body.appendChild(a);
             a.click();
             a.remove();
+        }
+
+        function fmDownloadDir(name) {
+            const dirPath = currentFmPath === '/' ? name : currentFmPath + '/' + name;
+            const a = document.createElement('a');
+            a.href = '/api/files/download-dir?path=' + encodeURIComponent(dirPath);
+            a.download = name + '.zip';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            showToast('Packing ' + name + ' as .zip \u2026', 'info');
+        }
+
+        function fmRename(name) {
+            const itemPath = currentFmPath === '/' ? name : currentFmPath + '/' + name;
+            const next = prompt('Rename "' + name + '" to:', name);
+            if (!next) return;
+            const clean = next.trim();
+            if (clean === name) return;
+            if (!/^[a-zA-Z0-9._ -]+$/.test(clean) || clean.indexOf('/') !== -1 || clean.indexOf('\\') !== -1 || clean.indexOf('..') !== -1) {
+                showToast('Invalid name \u2014 use letters, numbers, dots, spaces, _ and - only', 'error');
+                return;
+            }
+            fetch('/api/files/rename', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: itemPath, name: clean })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        showToast('Renamed to ' + clean, 'success');
+                        loadFileManager('/api/files/list?path=' + encodeURIComponent(currentFmPath), currentFmPath);
+                        loadFmStorage();
+                    } else {
+                        showToast(data.error || 'Rename failed', 'error');
+                    }
+                })
+                .catch(function() { showToast('Network error during rename', 'error'); });
         }
 
         function fmNavigateInto(name) {
@@ -3894,6 +4049,7 @@
                         statusEl.textContent = 'Editable';
                         closeFileEditor();
                         loadFileManager('/api/files/list?path=' + encodeURIComponent(currentFmPath), currentFmPath);
+                        loadFmStorage();
                     }, 800);
                 } else {
                     statusEl.textContent = 'Error: ' + data.error;
@@ -3943,6 +4099,7 @@
                 if (data.success) {
                     closeCreateModal();
                     loadFileManager('/api/files/list?path=' + encodeURIComponent(currentFmPath), currentFmPath);
+                    loadFmStorage();
                 } else {
                     alert('Error: ' + (data.error || 'Failed to create'));
                 }
@@ -3953,13 +4110,20 @@
 
         function fmDelete(name) {
             const itemPath = currentFmPath === '/' ? name : currentFmPath + '/' + name;
-            confirmModal('Delete "' + name + '"?', 'This cannot be undone.', function() {
+            const item = (currentFmFiles || []).find(function(f) { return f.name === name; });
+            const isDir = !!(item && item.isDirectory);
+            const sizeTxt = item && item.size ? ' (' + formatBytes(item.size) + ')' : '';
+            const detail = isDir
+                ? 'This permanently deletes the folder "' + name + '" and everything inside it' + sizeTxt + '. This cannot be undone.'
+                : 'This permanently deletes "' + name + '"' + sizeTxt + '. This cannot be undone.';
+            confirmModal('Delete "' + name + '"?', detail, function() {
                 fetch('/api/files/' + encodeURIComponent(itemPath), { method: 'DELETE' })
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (data.success) {
                             showToast('Deleted ' + name, 'success');
                             loadFileManager('/api/files/list?path=' + encodeURIComponent(currentFmPath), currentFmPath);
+                            loadFmStorage();
                         } else {
                             showToast(data.error || 'Failed to delete', 'error');
                         }

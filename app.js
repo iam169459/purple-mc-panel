@@ -176,6 +176,10 @@ let restartPending = false;
 
 let isUpdateRunning = false;
 
+// True once SIGINT/SIGTERM/self-update shutdown begins — used to keep the
+// Minecraft crash-restart logic from fighting a deliberate panel shutdown.
+let shuttingDown = false;
+
 // Player tracking
 let onlinePlayers = [];
 let playerLocations = {};
@@ -627,6 +631,11 @@ async function startServer() {
                 return;
             }
 
+            if (shuttingDown) {
+                log(`Minecraft server stopped during panel shutdown (exit code: ${code}) — not auto-restarting.`, 'info');
+                return;
+            }
+
             if (wasRunning && code !== 0) {
                 const crashInfo = captureCrashSnapshot(code);
                 const crashMsg = crashInfo.reason === 'out_of_memory'
@@ -835,6 +844,32 @@ function getDiskBreakdown() {
         log(`Disk breakdown error: ${err.message}`, 'warn');
     }
     return breakdown.sort((a, b) => b.totalBytes - a.totalBytes);
+}
+
+/**
+ * getHostDiskInfo — free/total bytes of the filesystem that hosts the
+ * server directory (statfs). Returns null when unsupported (old Node
+ * without fs.statfsSync) so callers can degrade gracefully.
+ */
+function getHostDiskInfo() {
+    try {
+        if (typeof fs.statfsSync !== 'function') return null;
+        const s = fs.statfsSync(SERVER_DIR);
+        if (!s || !s.bsize) return null;
+        const totalBytes = s.blocks * s.bsize;
+        const freeBytes = s.bavail * s.bsize;
+        const usedBytes = totalBytes - freeBytes;
+        return {
+            totalBytes,
+            freeBytes,
+            usedBytes,
+            totalGB: Math.round(totalBytes / 1024 / 1024 / 1024 * 100) / 100,
+            freeGB: Math.round(freeBytes / 1024 / 1024 / 1024 * 100) / 100,
+            usedPercent: totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0
+        };
+    } catch {
+        return null;
+    }
 }
 
 function getSystemMetrics() {
@@ -1085,6 +1120,16 @@ app.get('/api/files/list', (req, res) => {
             return sendError(res, 'Directory not found', 404);
         }
         const files = safeReadDir(filePath);
+        // Attach recursive sizes + file counts to folders (cached by
+        // getDiskUsage, invalidated on mutation) so the explorer doubles
+        // as a storage-triage view — worlds show their real footprint.
+        for (const f of files) {
+            if (f.isDirectory) {
+                const usage = getDiskUsage(path.join(filePath, f.name));
+                f.size = usage && !usage.error ? usage.totalBytes : 0;
+                f.fileCount = usage && !usage.error ? usage.fileCount : 0;
+            }
+        }
         res.json({ success: true, path: userPath || '', files });
     } catch (err) {
         if (err.message === 'PATH_TRAVERSAL_DETECTED') {
@@ -1142,6 +1187,7 @@ app.post('/api/files/save', (req, res) => {
         }
 
         fs.writeFileSync(filePath, content, 'utf8');
+        diskCache.clear();
         log(`File saved: ${userPath}`, 'info');
         res.json({ success: true, path: userPath });
     } catch (err) {
@@ -1177,6 +1223,7 @@ app.post('/api/files/create', (req, res) => {
             }
             fs.writeFileSync(target, '');
         }
+        diskCache.clear();
         log(`Created ${type}: ${name} in ${dir || '/'}`, 'info');
         res.json({ success: true });
     } catch (err) {
@@ -1197,6 +1244,7 @@ app.put('/api/files/:path(*)', (req, res) => {
         if (typeof content !== 'string' || content.length > 5 * 1024 * 1024) return sendError(res, 'Invalid content', 413);
 
         fs.writeFileSync(filePath, content, 'utf8');
+        diskCache.clear();
         log(`File updated: ${req.params.path}`, 'info');
         res.json({ success: true });
     } catch (err) {
@@ -1214,6 +1262,7 @@ app.delete('/api/files/:path(*)', (req, res) => {
         } else {
             fs.unlinkSync(filePath);
         }
+        diskCache.clear();
         log(`Deleted: ${req.params.path}`, 'info');
         res.json({ success: true });
     } catch (err) {
@@ -1233,6 +1282,102 @@ app.get('/api/files/download', (req, res) => {
 
         log(`File downloaded: ${userPath}`, 'info');
         res.download(filePath, path.basename(filePath));
+    } catch (err) {
+        if (err.message === 'PATH_TRAVERSAL_DETECTED') {
+            log(`Directory traversal attempt blocked: ${userPath}`, 'error');
+            return sendError(res, 'Access denied', 403);
+        }
+        sendError(res, err.message);
+    }
+});
+
+// Combined storage overview for the file explorer header: recursive
+// server usage, host-disk free space, and per-folder breakdown.
+app.get('/api/files/storage', (req, res) => {
+    const server = getDiskUsage(SERVER_DIR);
+    const host = getHostDiskInfo();
+    const folders = getDiskBreakdown().slice(0, 14);
+    res.json({ success: true, server, host, folders });
+});
+
+// Stream any folder (a world, plugins/, logs/, ...) as a zip archive.
+// Uses the same system `zip` the backup engine relies on; the archive is
+// piped straight to the client so multi-GB worlds never touch disk twice.
+function dirHasFiles(dirPath) {
+    try {
+        for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+            const full = path.join(dirPath, entry.name);
+            if (!entry.isDirectory()) return true;
+            if (dirHasFiles(full)) return true;
+        }
+    } catch {}
+    return false;
+}
+
+app.get('/api/files/download-dir', (req, res) => {
+    const { path: userPath } = req.query;
+    if (!userPath) return sendError(res, 'path parameter is required');
+    try {
+        const filePath = sanitizePath(SERVER_DIR, userPath);
+        if (!fs.existsSync(filePath) || !fs.statSync(filePath).isDirectory()) {
+            return sendError(res, 'Folder not found', 404);
+        }
+        if (!dirHasFiles(filePath)) return sendError(res, 'Folder is empty', 400);
+        const baseName = String(path.basename(filePath) || 'server').replace(/"/g, '');
+        const child = spawn('zip', ['-r', '-', '.'], { cwd: filePath, stdio: ['ignore', 'pipe', 'pipe'] });
+        let done = false;
+        const fail = (message, status) => {
+            done = true;
+            try { child.kill('SIGKILL'); } catch {}
+            if (!res.headersSent) return sendError(res, message, status);
+            try { res.destroy(); } catch {} // partial stream — abort the download
+        };
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.zip"`);
+        child.on('error', (err) => {
+            fail(`Folder download failed — the 'zip' utility is not installed (${err.message})`, 500);
+        });
+        child.on('close', (code) => {
+            if (code !== 0 && !done) fail(`Folder download failed (zip exit code ${code})`, 500);
+            if (code === 0 && !res.writableEnded) res.end();
+        });
+        child.stdout.pipe(res);
+        log(`Folder download requested: ${userPath}`, 'info');
+    } catch (err) {
+        if (err.message === 'PATH_TRAVERSAL_DETECTED') {
+            log(`Directory traversal attempt blocked: ${userPath}`, 'error');
+            return sendError(res, 'Access denied', 403);
+        }
+        sendError(res, err.message);
+    }
+});
+
+// Rename a file or folder inside its current directory.
+app.post('/api/files/rename', (req, res) => {
+    const { path: userPath, name: newName } = req.body;
+    if (!userPath || typeof newName !== 'string' || !newName.trim()) {
+        return sendError(res, 'path and name are required');
+    }
+    const clean = newName.trim();
+    if (!/^[a-zA-Z0-9._ -]+$/.test(clean) || clean.includes('..')) {
+        return sendError(res, 'Invalid name — use letters, numbers, dots, spaces, _ and - only');
+    }
+    try {
+        const oldPath = sanitizePath(SERVER_DIR, userPath);
+        if (!fs.existsSync(oldPath)) return sendError(res, 'Not found', 404);
+        if (path.resolve(oldPath) === path.resolve(SERVER_DIR)) {
+            return sendError(res, 'Cannot rename the server root', 400);
+        }
+        const target = sanitizePath(path.dirname(oldPath), clean);
+        if (path.resolve(target) === path.resolve(oldPath)) return res.json({ success: true });
+        if (fs.existsSync(target)) {
+            return sendError(res, `A file or folder named "${clean}" already exists`, 409);
+        }
+        fs.renameSync(oldPath, target);
+        diskCache.clear();
+        const rel = path.relative(path.resolve(SERVER_DIR), target).split(path.sep).join('/');
+        log(`Renamed: ${userPath} → ${rel}`, 'info');
+        res.json({ success: true, newPath: rel });
     } catch (err) {
         if (err.message === 'PATH_TRAVERSAL_DETECTED') {
             log(`Directory traversal attempt blocked: ${userPath}`, 'error');
@@ -1283,6 +1428,7 @@ app.post('/api/files/upload', (req, res) => {
 
         const relDir = path.relative(path.resolve(SERVER_DIR), path.resolve(targetDir)).replace(/\\/g, '/');
         const relPath = (relDir && relDir !== '.' ? relDir + '/' : '') + req.file.filename;
+        diskCache.clear();
         log(`File uploaded: ${relPath} (${(req.file.size / 1024 / 1024).toFixed(2)} MB)`, 'info');
         res.json({ success: true, path: relPath, name: req.file.filename, size: req.file.size });
     });
@@ -1965,6 +2111,7 @@ async function runPluginInstall(req, res, resourceId, source, name) {
         emitProgress('verifying', 100, 'Verifying downloaded file...');
 
         const stat = fs.statSync(targetPath);
+        diskCache.clear(); // plugins/ changed — folder sizes must refresh
         if (stat.size < 1000) {
             fs.unlinkSync(targetPath);
             emitProgress('error', 0, 'Downloaded file is too small, may be corrupted');
@@ -2002,6 +2149,7 @@ app.post('/api/plugins/upload', (req, res) => {
         if (!req.file) return sendError(res, 'No file uploaded', 400);
 
         const { filename, size, path: filePath } = req.file;
+        diskCache.clear();
         log(`Plugin uploaded: ${filename} (${(size / 1024 / 1024).toFixed(2)} MB)`, 'info');
         io.emit('console', `\n[PLUGIN] Uploaded: ${filename}\n`);
         const needsRestart = !!mcProcess;
@@ -2021,6 +2169,7 @@ app.delete('/api/plugins/:name', (req, res) => {
         const pluginPath = path.join(SERVER_DIR, 'plugins', name);
         if (fs.existsSync(pluginPath)) {
             fs.unlinkSync(pluginPath);
+            diskCache.clear();
             log(`Plugin deleted: ${name}`, 'info');
             res.json({ success: true });
         } else {
@@ -2579,8 +2728,10 @@ function restartPanel() {
     return new Promise(resolve => {
         if (process.env.pm_id !== undefined || process.env.PM2_HOME) {
             // Under PM2 a clean exit makes the process manager bring the new code back up.
-            log('Panel runs under PM2 — exiting for automatic restart with the new version', 'info');
-            setTimeout(() => process.exit(0), 1500);
+            // Exit through the graceful-shutdown path so a running Minecraft
+            // server is stopped (world saved) instead of orphaned mid-session.
+            log('Panel runs under PM2 — shutting down for automatic restart with the new version', 'info');
+            requestShutdown('self-update restart');
             return resolve(true);
         }
         const child = spawn('pm2', ['restart', 'purple-mc-panel'], { stdio: 'ignore' });
@@ -2816,7 +2967,58 @@ function checkScheduledBackups() {
 setInterval(checkScheduledBackups, 30 * 60 * 1000);
 
 // ================================================================
-// PHASE 18: SERVER INITIALIZATION
+// PHASE 18: GRACEFUL SHUTDOWN (PM2 / SIGTERM / SIGINT / updates)
+// ================================================================
+// When the panel is stopped or restarted (pm2 restart/stop, host reboot,
+// self-update) PM2 sends SIGINT/SIGTERM and escalates to SIGKILL only after
+// kill_timeout. Without handlers a running Minecraft server would be orphaned
+// mid-session, so on shutdown we first tell it to stop cleanly ('stop' →
+// world save) and only exit once it is gone. With autoStart enabled, the
+// server then comes right back when PM2 starts the panel again.
+
+function requestShutdown(reason) {
+    if (shuttingDown) {
+        // Second signal while stopping — don't block the reboot/restart.
+        log(`Second shutdown signal while stopping — force-killing the Minecraft server.`, 'error');
+        try { if (mcProcess) mcProcess.kill('SIGKILL'); } catch {}
+        process.exit(1);
+        return;
+    }
+    shuttingDown = true;
+    if (!mcProcess) {
+        log(`Shutdown requested (${reason}) — no Minecraft server running, exiting.`, 'info');
+        // Short grace so in-flight socket events (e.g. update progress) flush.
+        setTimeout(() => process.exit(0), 1200);
+        return;
+    }
+    log(`Shutdown requested (${reason}) — stopping the Minecraft server cleanly...`, 'warn');
+    try {
+        emitConsoleSafe(`\n${COLORS.yellow}[SYSTEM]${COLORS.reset} Panel is shutting down — saving the world and stopping the Minecraft server...\n`);
+        mcProcess.stdin.write('stop\n');
+    } catch {}
+    // Hard cap so a hung server can never block a reboot or update forever.
+    // Keep this UNDER the ecosystem kill_timeout (30s) so we force-kill the
+    // Minecraft server and exit cleanly before PM2 escalates to SIGKILL.
+    const deadline = setTimeout(() => {
+        log('Minecraft server did not stop within 20s — force-killing it and exiting.', 'error');
+        try { if (mcProcess) mcProcess.kill('SIGKILL'); } catch {}
+        process.exit(0);
+    }, 20000);
+    const watcher = setInterval(() => {
+        if (!mcProcess) {
+            clearInterval(watcher);
+            clearTimeout(deadline);
+            log('Minecraft server stopped — panel exiting.', 'info');
+            process.exit(0);
+        }
+    }, 500);
+}
+
+process.on('SIGINT', () => requestShutdown('SIGINT'));
+process.on('SIGTERM', () => requestShutdown('SIGTERM'));
+
+// ================================================================
+// PHASE 19: SERVER INITIALIZATION
 // ================================================================
 
 async function init() {

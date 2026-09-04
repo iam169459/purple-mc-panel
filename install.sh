@@ -9,12 +9,12 @@
 #   ./install.sh status|start|stop|restart|logs|uninstall
 #
 # Flags (all commands): --port --install-dir --repo --branch
-#   --pm2-name --no-pm2 --no-java --unattended --help
+#   --pm2-name --no-pm2 --no-java --no-autostart --unattended --help
 # ============================================================
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.2.3"
+SCRIPT_VERSION="1.3.0"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 INSTALL_DIR="/var/www/purple-mc-panel"
 PANEL_DIR="$INSTALL_DIR"
@@ -23,6 +23,7 @@ PORT="3000"
 BRANCH="main"
 NO_PM2=false
 NO_JAVA=false
+NO_AUTOSTART=false
 UNATTENDED=false
 NEEDS_NPM=true
 INSTALL_DIR_SET=false
@@ -85,6 +86,7 @@ usage() {
     echo "  --pm2-name <name>    PM2 process name (default: $PM2_NAME)"
     echo "  --no-pm2             Skip PM2 setup"
     echo "  --no-java            Skip Java installation"
+    echo "  --no-autostart       Skip boot autostart (pm2 startup + Minecraft auto-start)"
     echo "  --unattended         No prompts (requires root for install/fresh/uninstall)"
     echo "  --help, -h           Show this help"
     echo ""
@@ -445,7 +447,15 @@ module.exports = {
         script: "app.js",
         cwd: "$PANEL_DIR",
         env: { PORT: $PORT },
+        // Auto-restart the panel if it crashes — with a short delay and
+        // exponential back-off so a crash-loop can't hammer the machine.
+        autorestart: true,
+        restart_delay: 1000,
+        exp_backoff_restart_delay: 100,
         max_memory_restart: "500M",
+        // Grace period for app.js to stop the Minecraft server (world save)
+        // before PM2 escalates to SIGKILL on stop/restart/reboot.
+        kill_timeout: 30000,
         log_date_format: "YYYY-MM-DD HH:mm:ss Z",
         error_file: "$PANEL_DIR/logs/error.log",
         out_file: "$PANEL_DIR/logs/output.log",
@@ -454,6 +464,69 @@ module.exports = {
 };
 EOF
     ok "ecosystem.config.cjs written."
+}
+
+# Flip the panel's "auto-start Minecraft server" setting so the whole stack
+# (machine boot → PM2 → panel → Minecraft server) comes back by itself after
+# a reboot or power cut. Only touched on brand-new installs — an existing
+# config/settings.json keeps whatever the owner chose in the panel UI.
+enable_mc_autostart() {
+    if $NO_PM2 || $NO_AUTOSTART || [[ "$INSTALL_MODE" == "reinstall" ]]; then return; fi
+    local sf="$PANEL_DIR/config/settings.json"
+    mkdir -p "$PANEL_DIR/config"
+    if [[ -f "$sf" ]]; then
+        if grep -q '"autoStart"' "$sf"; then
+            info "config/settings.json present — keeping its autoStart preference."
+        elif node -e '
+                const fs = require("fs");
+                const p = process.argv[1];
+                try {
+                    const j = JSON.parse(fs.readFileSync(p, "utf8"));
+                    if (typeof j.autoStart === "undefined") {
+                        j.autoStart = true;
+                        fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+                    }
+                } catch (e) { process.exit(1); }
+            ' "$sf" 2>/dev/null; then
+            ok "Enabled Minecraft auto-start in config/settings.json (kept other settings)."
+        else
+            warn "Could not enable Minecraft auto-start — turn it on in the panel's Settings."
+        fi
+    else
+        printf '{\n  "autoStart": true\n}\n' > "$sf"
+        ok "Minecraft server will auto-start with the panel (after boot, restart, or crash recovery)."
+    fi
+}
+
+# Register PM2 with the init system so the panel comes back on its own after
+# a machine reboot/power cycle (pm2 startup + pm2 save). systemd is detected
+# automatically; where that is unavailable (containers, WSL, SysV hosts),
+# fall back to an @reboot crontab entry that runs 'pm2 resurrect'.
+pm2_boot_autostart() {
+    if $NO_PM2 || $NO_AUTOSTART; then return; fi
+    info "Enabling boot autostart (panel starts automatically when the machine powers on)..."
+    local out rc=0
+    out=$(pm2 startup 2>&1) || rc=$?
+    if (( rc == 0 )); then
+        ok "PM2 registered with the init system — panel will start on boot."
+    elif [[ "$(uname -s)" == "Linux" ]] && command -v crontab &>/dev/null; then
+        # No (or non-rooted) systemd — keep PM2 alive across reboots via cron.
+        local pm2_bin pm2_dir line
+        pm2_bin="$(command -v pm2)"
+        pm2_dir="$(dirname "$pm2_bin")"
+        line="@reboot env PATH=\"$pm2_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\" PM2_HOME=\"${PM2_HOME:-$HOME/.pm2}\" $pm2_bin resurrect >>/var/log/pm2-resurrect.log 2>&1"
+        if crontab -l 2>/dev/null | grep -qF "pm2 resurrect"; then
+            ok "Boot autostart already present in crontab (@reboot pm2 resurrect)."
+        elif ( crontab -l 2>/dev/null | grep -vF "pm2 resurrect"; echo "$line" ) | crontab - 2>/dev/null; then
+            ok "Boot autostart registered via @reboot crontab (no systemd detected)."
+        else
+            warn "Could not register boot autostart — run 'pm2 startup' manually after install."
+        fi
+    else
+        warn "pm2 startup could not auto-register (common in containers/WSL/macOS)."
+        warn "Finish it manually with: pm2 startup   (then run the command it prints)"
+    fi
+    pm2 save --silent || true
 }
 
 setup_pm2() {
@@ -473,6 +546,7 @@ setup_pm2() {
         pm2 start "$PANEL_DIR/ecosystem.config.cjs" >/dev/null 2>&1
     fi
     pm2 save --silent || true
+    pm2_boot_autostart
     ok "Service '$PM2_NAME' is running (PM2)."
 }
 
@@ -503,6 +577,7 @@ run_install_stages() {
     fetch_code
     install_npm_deps
     write_env_and_ecosystem
+    enable_mc_autostart
     setup_pm2
     open_firewall
     summary
@@ -511,7 +586,10 @@ run_install_stages() {
 # ── NEW SERVER / PC — guided first-time setup ──
 wizard_prompts() {
     if $UNATTENDED || [[ ! -t 0 && ! -e /dev/tty ]]; then
-        info "Unattended mode — using defaults (dir=$PANEL_DIR, port=$PORT, pm2=$([ $NO_PM2 ] && echo off || echo on))."
+        local pm2_state autostart_state
+        $NO_PM2 && pm2_state="off" || pm2_state="on"
+        $NO_AUTOSTART && autostart_state="off" || autostart_state="on"
+        info "Unattended mode — using defaults (dir=$PANEL_DIR, port=$PORT, pm2=$pm2_state, boot-autostart=$autostart_state)."
         return
     fi
     info "First-time setup wizard — press Enter to accept the default."
@@ -523,6 +601,10 @@ wizard_prompts() {
     ans=$(prompt "Manage with PM2? [Y/n]:" "y");
     if [[ "$ans" =~ ^[Nn] ]]; then NO_PM2=true; else
         ans=$(prompt "PM2 process name [${PM2_NAME}]:" "$PM2_NAME");         PM2_NAME="$ans"
+    fi
+    if ! $NO_PM2; then
+        ans=$(prompt "Auto-start the panel and Minecraft server whenever the machine powers on? [Y/n]:" "y")
+        [[ "$ans" =~ ^[Nn] ]] && NO_AUTOSTART=true
     fi
     ans=$(prompt "Install Java 17+ (needed for Minecraft)? [Y/n]:" "y");
     [[ "$ans" =~ ^[Nn] ]] && NO_JAVA=true
@@ -590,6 +672,11 @@ cmd_update() {
             pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1 \
                 && ok "Panel restarted under PM2 ('$PM2_NAME')." \
                 || warn "Could not restart PM2 '$PM2_NAME' — start it manually."
+            if [[ $EUID -eq 0 ]]; then
+                pm2_boot_autostart
+            else
+                info "Not root — skipping boot-autostart registration (run 'sudo $0 update' once to (re)register it)."
+            fi
         else
             info "PM2 not installed — code updated; start the panel manually."
         fi
@@ -660,6 +747,7 @@ summary() {
     echo -e "  Directory: $PANEL_DIR"
     echo -e "  Commands : ./install.sh status | logs | update"
     ! $NO_PM2 && echo -e "  PM2      : pm2 status $PM2_NAME / pm2 logs $PM2_NAME"
+    ! $NO_PM2 && ! $NO_AUTOSTART && echo -e "  Boot     : panel + Minecraft server auto-start on machine power-on (pm2 startup)"
     echo ""
 }
 
@@ -725,6 +813,7 @@ while [[ $# -gt 0 ]]; do
         --pm2-name)    PM2_NAME="${2:?Missing PM2 name}"; shift 2 ;;
         --no-pm2)      NO_PM2=true; shift ;;
         --no-java)     NO_JAVA=true; shift ;;
+        --no-autostart) NO_AUTOSTART=true; shift ;;
         --unattended)  UNATTENDED=true; shift ;;
         --help|-h)     usage; exit 0 ;;
         *)             err "Unknown option or action: $1"; usage; exit 1 ;;
