@@ -435,7 +435,7 @@ install_npm_deps() {
 }
 
 write_env_and_ecosystem() {
-    step 4 6 "Configuration"
+    step 5 7 "Configuration"
     if [[ ! -f "$PANEL_DIR/.env" ]]; then
         echo "PORT=$PORT" > "$PANEL_DIR/.env"
     elif grep -q "^PORT=" "$PANEL_DIR/.env"; then
@@ -547,7 +547,7 @@ pm2_boot_autostart() {
 }
 
 setup_pm2() {
-    step 5 6 "Service"
+    step 6 7 "Service"
     if $NO_PM2; then return; fi
     if ! command -v pm2 &>/dev/null; then
         info "Installing PM2 globally..."
@@ -571,7 +571,7 @@ setup_pm2() {
 }
 
 open_firewall() {
-    step 6 6 "Firewall"
+    step 7 7 "Firewall"
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
         ufw allow "$PORT/tcp"   >/dev/null 2>&1 || true
         ufw allow 25565/tcp     >/dev/null 2>&1 || true
@@ -590,12 +590,30 @@ cmd_install() {
     run_install_stages
 }
 
+build_panel() {
+    step 4 7 "Build panel"
+    cd "$PANEL_DIR"
+    local logfile pid
+    logfile="$(mktemp /tmp/pmc-build-XXXXXX.log)"
+    npm run build >"$logfile" 2>&1 &
+    pid=$!; show_spinner "$pid" "Building TypeScript + React client..."
+    if ! wait "$pid"; then
+        err "Build failed — output tail:"
+        tail -n 15 "$logfile" | sed 's/^/    /'
+        err "Diagnose manually: cd $PANEL_DIR && npm run build"
+        exit 1
+    fi
+    rm -f "$logfile"
+    ok "Panel built successfully."
+}
+
 run_install_stages() {
     detect_pkg_manager
     [[ "$INSTALL_MODE" == "reinstall" ]] || install_system_deps
     install_java
     fetch_code
     install_npm_deps
+    build_panel
     write_env_and_ecosystem
     enable_mc_autostart
     setup_pm2
@@ -706,6 +724,7 @@ update_flow() { # shared by 'update' and 'update-dev' (git check + INSTALL_MODE 
     [[ $EUID -ne 0 ]] && warn "Not root — npm and PM2 steps may fail if the panel is root-owned."
     fetch_code
     install_npm_deps
+    build_panel
     write_env_and_ecosystem
     if ! $NO_PM2; then
         if command -v pm2 &>/dev/null; then
