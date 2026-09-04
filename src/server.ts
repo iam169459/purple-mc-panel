@@ -8,6 +8,8 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import axios from 'axios';
 import { ctx, emit, resetServerRuntimeState } from './context';
@@ -40,6 +42,128 @@ export function emitConsoleSafe(msg: string): void {
 
 function statusEmit(state: 'online' | 'offline'): void {
   emit('status', state);
+}
+
+// ------------------------------------------------------------------
+// Auto Java download (Adoptium / Eclipse Temurin)
+// ------------------------------------------------------------------
+
+const JAVA_INSTALL_DIR = path.join(path.dirname(JAR_PATH), '..', 'java');
+
+function getJavaArch(): string {
+  const arch = os.arch();
+  if (arch === 'x64') return 'x64';
+  if (arch === 'arm64') return 'aarch64';
+  return 'x64';
+}
+
+function getInstalledJavaVersion(): number | null {
+  const settings = loadSettings();
+  const javaPath = settings.javaPath || 'java';
+  // Check downloaded Java first
+  const downloadedJava = path.join(JAVA_INSTALL_DIR, 'bin', 'java');
+  const candidates = [downloadedJava, javaPath, 'java'];
+  for (const jp of candidates) {
+    try {
+      const { execSync } = require('child_process');
+      const out = execSync(`${jp} -version 2>&1`, { timeout: 5000 }).toString();
+      const match = out.match(/version[\s"]+(\d+)/);
+      if (match) return parseInt(match[1], 10);
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+/**
+ * Downloads Adoptium Temurin JDK if the required version isn't available.
+ * Returns the path to the java binary, or null on failure.
+ */
+export async function ensureJava(requiredVersion: number): Promise<string | null> {
+  const current = getInstalledJavaVersion();
+  if (current !== null && current >= requiredVersion) {
+    const downloaded = path.join(JAVA_INSTALL_DIR, 'bin', 'java');
+    if (fs.existsSync(downloaded)) return downloaded;
+    return null; // system java is good enough
+  }
+
+  emitConsoleSafe(`\n${COLORS.cyan}[SYSTEM]${COLORS.reset} Java ${current ?? 'not found'} detected — Paper requires Java ${requiredVersion}. Downloading Adoptium Temurin...\n`);
+  log(`Java ${current ?? 'not found'} detected, need ${requiredVersion} — downloading Adoptium`, 'info');
+
+  const arch = getJavaArch();
+  const url = `https://api.adoptium.net/v3/binary/latest/${requiredVersion}/ga/linux/${arch}/jdk/hotspot/normal/eclipse`;
+  const tmpDir = path.join(os.tmpdir(), `pmc-java-${Date.now()}`);
+  const archivePath = path.join(tmpDir, 'jdk.tar.gz');
+
+  try {
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.mkdirSync(JAVA_INSTALL_DIR, { recursive: true });
+
+    let lastPct = 0;
+    await downloadFile(url, archivePath, (got, total) => {
+      const pct = total > 0 ? Math.round((got / total) * 100) : 0;
+      if (pct - lastPct >= 10 || pct === 100) {
+        lastPct = pct;
+        const mb = (got / 1024 / 1024).toFixed(0);
+        const msg = `Downloading Java ${requiredVersion} (Adoptium) ${total > 0 ? `${pct}%` : `${mb} MB`}...`;
+        pushToLogBuffer(`[SYSTEM] ${msg}`, 'system');
+        emitConsoleSafe(`\n${COLORS.cyan}[DOWNLOAD]${COLORS.reset} ${msg}\n`);
+      }
+    });
+
+    emitConsoleSafe(`\n${COLORS.cyan}[SYSTEM]${COLORS.reset} Extracting Java ${requiredVersion}...\n`);
+
+    // Extract
+    const { execSync } = require('child_process');
+    execSync(`tar -xzf ${archivePath} -C ${tmpDir}`, { timeout: 120000 });
+
+    // Find the extracted JDK directory
+    const entries = fs.readdirSync(tmpDir).filter((e: string) => e.startsWith('jdk-') || e.startsWith('jdk_'));
+    if (entries.length === 0) throw new Error('JDK directory not found in archive');
+
+    const extractedDir = path.join(tmpDir, entries[0]);
+    // Move to install dir
+    const targetDir = path.join(JAVA_INSTALL_DIR, `jdk-${requiredVersion}`);
+    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+    fs.renameSync(extractedDir, targetDir);
+
+    // Symlink bin/java
+    const binDir = path.join(JAVA_INSTALL_DIR, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const javaBin = path.join(targetDir, 'bin', 'java');
+    const linkPath = path.join(binDir, 'java');
+    if (fs.existsSync(linkPath)) fs.rmSync(linkPath);
+    fs.symlinkSync(javaBin, linkPath);
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+
+    const doneMsg = `Java ${requiredVersion} installed at ${targetDir}`;
+    pushToLogBuffer(`[SYSTEM] ${doneMsg}`, 'system');
+    emitConsoleSafe(`\n${COLORS.green}[SYSTEM]${COLORS.reset} ${doneMsg}\n`);
+    log(doneMsg, 'info');
+
+    // Save the java path in settings
+    const settings = loadSettings();
+    settings.javaPath = javaBin;
+    saveSettings(settings);
+
+    return javaBin;
+  } catch (err) {
+    emitConsoleSafe(`\n${COLORS.red}[ERROR]${COLORS.reset} Failed to download Java ${requiredVersion}: ${(err as Error).message}\n`);
+    log(`Adoptium download failed: ${(err as Error).message}`, 'error');
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    return null;
+  }
+}
+
+/**
+ * Parse the required Java version from a server crash message.
+ * e.g. "requires running the server with Java 25" → 25
+ */
+function parseRequiredJavaVersion(recentLines: string[]): number | null {
+  const combined = recentLines.join('\n');
+  const match = combined.match(/requires running the server with Java\s+(\d+)/i);
+  return match ? parseInt(match[1], 10) : null;
 }
 
 // ------------------------------------------------------------------
@@ -340,10 +464,28 @@ function handleProcessClose(code: number | null): void {
         : crashInfo.reason === 'plugin_failure' || crashInfo.reason === 'plugin_incompatibility'
           ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}Plugin problem detected!${COLORS.reset} Remove or update recently added plugins and restart.`
           : crashInfo.reason === 'java_version_mismatch'
-            ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}Java version mismatch!${COLORS.reset} Paper requires a newer Java — run 'sudo ./install.sh install' to upgrade.`
+            ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}Java version mismatch!${COLORS.reset} Paper requires a newer Java — downloading now...`
             : `${COLORS.red}[CRASH]${COLORS.reset} Server exited with code ${code}`;
 
     emitConsoleSafe(`\n${crashMsg}\n`);
+
+    // Auto-download the required Java version on mismatch
+    if (crashInfo.reason === 'java_version_mismatch') {
+      const requiredJava = parseRequiredJavaVersion(ctx.logBuffer.map((e) => e.text));
+      if (requiredJava) {
+        ctx.crashCount = 0;
+        ensureJava(requiredJava).then((javaBin) => {
+          if (javaBin) {
+            emitConsoleSafe(`\n${COLORS.green}[SYSTEM]${COLORS.reset} Java ${requiredJava} ready — restarting server...\n`);
+            log(`Auto-downloaded Java ${requiredJava} at ${javaBin}, restarting server`, 'info');
+            setTimeout(() => { void startServer({ resetCrashThrottle: true }); }, 2000);
+          } else {
+            emitConsoleSafe(`\n${COLORS.red}[SYSTEM]${COLORS.reset} Auto Java download failed. Install Java ${requiredJava}+ manually.\n`);
+          }
+        });
+        return;
+      }
+    }
 
     const s = loadSettings();
     if (s.autoRestart) {
