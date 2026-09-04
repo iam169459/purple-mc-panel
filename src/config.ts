@@ -61,7 +61,12 @@ export const PAPER_VERSION_IDS: string[] = [
 ];
 export const DEFAULT_VERSION = '1.20.4';
 export const DEFAULT_RAM = '4G';
-export const JAVA_FALLBACKS = (): string[] => ['java', '/usr/bin/java', '/usr/local/bin/java', '/opt/java/bin/java'];
+export const JAVA_FALLBACKS = (): string[] => [
+  'java',
+  '/usr/bin/java', '/usr/local/bin/java', '/opt/java/bin/java',
+  // Panel-downloaded Adoptium Java
+  path.join(path.dirname(path.join(__dirname, '..', '..')), 'server', 'java', 'bin', 'java')
+];
 
 // Java flags tuned for Minecraft server garbage collection (Aikar's flags).
 const DEFAULT_JAVA_ARGS = [
