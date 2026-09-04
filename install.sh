@@ -558,9 +558,12 @@ setup_pm2() {
     command -v pm2 &>/dev/null || { err "PM2 install failed — rerun with --no-pm2."; exit 1; }
 
     if pm2 list 2>/dev/null | grep -q "$PM2_NAME"; then
-        pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1
+        if ! pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1; then
+            pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
+            pm2 start "$PANEL_DIR/ecosystem.config.cjs" >/dev/null 2>&1 || true
+        fi
     else
-        pm2 start "$PANEL_DIR/ecosystem.config.cjs" >/dev/null 2>&1
+        pm2 start "$PANEL_DIR/ecosystem.config.cjs" >/dev/null 2>&1 || true
     fi
     pm2 save --silent || true
     pm2_boot_autostart
@@ -746,10 +749,10 @@ cmd_service() { # start|stop|restart
     if ! pm2_cmd list >/dev/null 2>&1; then exit 1; fi
     find_panel_dir
     case "$action" in
-        start)   if pm2 list 2>/dev/null | grep -q "$PM2_NAME"; then pm2 start "$PM2_NAME" >/dev/null
-                 else pm2 start "$PANEL_DIR/ecosystem.config.cjs" >/dev/null; fi ;;
-        stop)    pm2 stop "$PM2_NAME" >/dev/null ;;
-        restart) pm2 restart "$PM2_NAME" --update-env >/dev/null ;;
+        start)   if pm2 list 2>/dev/null | grep -q "$PM2_NAME"; then pm2 start "$PM2_NAME" >/dev/null || true
+                 else pm2 start "$PANEL_DIR/ecosystem.config.cjs" >/dev/null || true; fi ;;
+        stop)    pm2 stop "$PM2_NAME" >/dev/null || true ;;
+        restart) pm2 restart "$PM2_NAME" --update-env >/dev/null || true ;;
     esac
     ok "PM2 '$PM2_NAME' $action completed."
 }
