@@ -48,10 +48,17 @@ function newestMtime(dirs) {
 
 function run(cmd, label) {
   console.log(`[PurpleMC] ${label}…`);
+  // PM2 runs with a minimal PATH that often excludes npm.  Resolve it
+  // from the node binary directory so the build step always works.
+  const nodeDir = path.dirname(process.execPath);
+  const env = Object.assign({}, process.env, {
+    PATH: nodeDir + path.delimiter + (process.env.PATH || '')
+  });
   const res = spawnSync(cmd, [], {
     cwd: ROOT,
     stdio: 'inherit',
-    shell: process.platform === 'win32'
+    shell: true,
+    env
   });
   if (res.error || res.status !== 0) {
     console.error(`[PurpleMC] ${label} failed (exit ${res.status ?? res.error?.message}).`);
