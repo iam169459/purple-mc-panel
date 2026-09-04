@@ -293,6 +293,43 @@ install_node_if_needed() {
     ok "Node.js $(node -v) ready."
 }
 
+install_java_adoptium() { # $1 = Java major version (e.g. 25)
+    local ver="$1"
+    local arch
+    case "$(uname -m)" in
+        x86_64)  arch="x64" ;;
+        aarch64) arch="aarch64" ;;
+        *)       warn "Unsupported arch $(uname -m) for Adoptium fallback."; return 1 ;;
+    esac
+    local os
+    case "$(uname -s)" in
+        Linux) os="linux" ;;
+        *)     return 1 ;;
+    esac
+    local url="https://api.adoptium.net/v3/binary/latest/${ver}/ga/${os}/${arch}/jdk/hotspot/normal/eclipse"
+    local tmpdir
+    tmpdir=$(mktemp -d /tmp/pmc-java-XXXXXX)
+    info "Downloading Adoptium Java ${ver} for ${arch}..."
+    if ! curl -fsSL -o "$tmpdir/jdk.tar.gz" "$url" 2>/dev/null; then
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    local extract_dir
+    extract_dir=$(tar -tzf "$tmpdir/jdk.tar.gz" | head -n1 | cut -d/ -f1)
+    tar -xzf "$tmpdir/jdk.tar.gz" -C "$tmpdir" >/dev/null 2>&1
+    local java_bin="$tmpdir/$extract_dir/bin/java"
+    if [[ ! -x "$java_bin" ]]; then
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    mkdir -p /opt/java
+    mv "$tmpdir/$extract_dir" "/opt/java/jdk-${ver}" 2>/dev/null || true
+    ln -sf "/opt/java/jdk-${ver}/bin/java" /usr/local/bin/java 2>/dev/null || true
+    rm -rf "$tmpdir"
+    command -v java &>/dev/null && return 0
+    return 1
+}
+
 install_java() {
     if $NO_JAVA; then return; fi
     local existing=""
@@ -307,16 +344,16 @@ install_java() {
         info "Java not found — installing a compatible JRE..."
     fi
 
-    # Try the newest package first, then fall back. Distros like Ubuntu 22.04
-    # and Debian 12 only ship OpenJDK 17, which Paper still supports fine.
+    # Try the newest package first, then fall back. Paper 26+ needs Java 25;
+    # older Paper versions work with Java 17+.
     local candidates=()
     case "$PKG_MANAGER" in
-        apt)      candidates=(openjdk-21-jre-headless openjdk-17-jre-headless) ;;
-        dnf|yum)  candidates=(java-21-openjdk-headless java-17-openjdk-headless) ;;
-        zypper)   candidates=(java-21-openjdk-headless java-17-openjdk-headless) ;;
+        apt)      candidates=(openjdk-25-jre-headless openjdk-21-jre-headless openjdk-17-jre-headless) ;;
+        dnf|yum)  candidates=(java-25-openjdk-headless java-21-openjdk-headless java-17-openjdk-headless) ;;
+        zypper)   candidates=(java-25-openjdk-headless java-21-openjdk-headless java-17-openjdk-headless) ;;
         pacman)   candidates=(jre-openjdk-headless) ;;
-        brew)     candidates=(openjdk@21 openjdk@17 openjdk) ;;
-        *)        candidates=(jre21-openjdk-headless openjdk-17-jre-headless) ;;
+        brew)     candidates=(openjdk@25 openjdk@21 openjdk@17 openjdk) ;;
+        *)        candidates=(jre25-openjdk-headless jre21-openjdk-headless openjdk-17-jre-headless) ;;
     esac
 
     local pkg installed_any=false
@@ -328,12 +365,18 @@ install_java() {
         fi
     done
 
+    # If no system package worked, try Adoptium (Eclipse Temurin) as a
+    # universal fallback — works on any Linux distro.
+    if ! command -v java &>/dev/null; then
+        install_java_adoptium 25 || install_java_adoptium 21 || true
+    fi
+
     # Homebrew installs are keg-only — put the JRE on PATH for this script
     # (and any process it spawns) so 'java' resolves without extra config.
     if [[ "$PKG_MANAGER" == "brew" ]] && ! command -v java &>/dev/null; then
         local brewopt d
         brewopt="$(brew --prefix 2>/dev/null)/opt"
-        for d in openjdk@21 openjdk@17 openjdk; do
+        for d in openjdk@25 openjdk@21 openjdk@17 openjdk; do
             if [[ -x "$brewopt/$d/bin/java" ]]; then
                 export PATH="$brewopt/$d/bin:$PATH"
                 export JAVA_HOME="$brewopt/$d/libexec/openjdk.jdk/Contents/Home"
@@ -348,7 +391,7 @@ install_java() {
         warn "A JRE was installed, but 'java' is not on PATH. Fix with: update-alternatives --config java"
     else
         err "Java installation failed — every candidate package was rejected (details above)."
-        err "Install Java 17+ manually, e.g. 'sudo apt-get install openjdk-17-jre-headless', then re-run."
+        err "Install Java 25+ manually for Paper 26+, or Java 17+ for older versions."
         exit 1
     fi
 }

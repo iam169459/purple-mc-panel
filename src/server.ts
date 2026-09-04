@@ -242,6 +242,10 @@ export function diagnoseCrash(code: number | null, recentLines: string[]): Crash
     diagnosis.reason = 'port_conflict';
     diagnosis.severity = 'high';
     diagnosis.repairs.push({ action: 'change_port', label: 'Port already in use — change server-port in settings', auto: false });
+  } else if (combined.includes('requires running the server with java') || combined.includes('java version') && combined.includes('not supported')) {
+    diagnosis.reason = 'java_version_mismatch';
+    diagnosis.severity = 'critical';
+    diagnosis.repairs.push({ action: 'install_java', label: 'Paper requires a newer Java version — install Java 25+ and restart', auto: false });
   } else if (code === 1) {
     diagnosis.reason = 'generic_error';
     diagnosis.severity = 'warning';
@@ -335,7 +339,9 @@ function handleProcessClose(code: number | null): void {
         ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}World corruption detected!${COLORS.reset} Restore from backup or run world repair.`
         : crashInfo.reason === 'plugin_failure' || crashInfo.reason === 'plugin_incompatibility'
           ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}Plugin problem detected!${COLORS.reset} Remove or update recently added plugins and restart.`
-          : `${COLORS.red}[CRASH]${COLORS.reset} Server exited with code ${code}`;
+          : crashInfo.reason === 'java_version_mismatch'
+            ? `${COLORS.red}[CRASH]${COLORS.reset} ${COLORS.yellow}Java version mismatch!${COLORS.reset} Paper requires a newer Java — run 'sudo ./install.sh install' to upgrade.`
+            : `${COLORS.red}[CRASH]${COLORS.reset} Server exited with code ${code}`;
 
     emitConsoleSafe(`\n${crashMsg}\n`);
 
