@@ -2727,9 +2727,10 @@ function runNpmInstall() {
 function restartPanel() {
     return new Promise(resolve => {
         if (process.env.pm_id !== undefined || process.env.PM2_HOME) {
-            // Under PM2 a clean exit makes the process manager bring the new code back up.
-            // Exit through the graceful-shutdown path so a running Minecraft
-            // server is stopped (world saved) instead of orphaned mid-session.
+            // Under PM2, exit through the graceful-shutdown path so a running
+            // Minecraft server is stopped (world saved) instead of orphaned
+            // mid-session; the non-zero exit makes PM2 auto-restart the panel
+            // with the freshly-installed code.
             log('Panel runs under PM2 — shutting down for automatic restart with the new version', 'info');
             requestShutdown('self-update restart');
             return resolve(true);
@@ -2975,6 +2976,12 @@ setInterval(checkScheduledBackups, 30 * 60 * 1000);
 // mid-session, so on shutdown we first tell it to stop cleanly ('stop' →
 // world save) and only exit once it is gone. With autoStart enabled, the
 // server then comes right back when PM2 starts the panel again.
+//
+// Under PM2 we must NOT exit 0: PM2 reads a clean code-0 exit as an
+// intentional stop and leaves the app "stopped", while an exit that looks
+// like a crash (non-zero) triggers autorestart and the panel heals itself.
+// Plain `npm start` users still get a clean 0.
+const PANEL_EXIT_CODE = (process.env.pm_id !== undefined || process.env.PM2_HOME) ? 1 : 0;
 
 function requestShutdown(reason) {
     if (shuttingDown) {
@@ -2988,7 +2995,7 @@ function requestShutdown(reason) {
     if (!mcProcess) {
         log(`Shutdown requested (${reason}) — no Minecraft server running, exiting.`, 'info');
         // Short grace so in-flight socket events (e.g. update progress) flush.
-        setTimeout(() => process.exit(0), 1200);
+        setTimeout(() => process.exit(PANEL_EXIT_CODE), 1200);
         return;
     }
     log(`Shutdown requested (${reason}) — stopping the Minecraft server cleanly...`, 'warn');
@@ -3002,14 +3009,14 @@ function requestShutdown(reason) {
     const deadline = setTimeout(() => {
         log('Minecraft server did not stop within 20s — force-killing it and exiting.', 'error');
         try { if (mcProcess) mcProcess.kill('SIGKILL'); } catch {}
-        process.exit(0);
+        process.exit(PANEL_EXIT_CODE);
     }, 20000);
     const watcher = setInterval(() => {
         if (!mcProcess) {
             clearInterval(watcher);
             clearTimeout(deadline);
             log('Minecraft server stopped — panel exiting.', 'info');
-            process.exit(0);
+            process.exit(PANEL_EXIT_CODE);
         }
     }, 500);
 }
