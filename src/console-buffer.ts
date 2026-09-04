@@ -11,7 +11,7 @@ import { stripAnsi, classifyLine } from './line';
 import { parsePlayerEvents } from './players';
 import { parseTpsEvents } from './tps';
 import { loadSettings } from './settings';
-import { CONSOLE_ABSOLUTE_MIN, CONSOLE_ABSOLUTE_MAX } from './config';
+import { CONSOLE_ABSOLUTE_MIN, CONSOLE_ABSOLUTE_MAX, CONSOLE_DEFAULT_MAX } from './config';
 import type { ConsoleLine, ClientConsoleLine } from './types';
 
 /** Cap enforcement: settings value clamped into the sane range. */
@@ -20,10 +20,26 @@ export function effectiveMaxLines(configured: number): number {
   return Math.max(CONSOLE_ABSOLUTE_MIN, Math.min(CONSOLE_ABSOLUTE_MAX, raw));
 }
 
+/** Cached max-lines value to avoid reading settings.json on every chunk. */
+let cachedMaxLines = effectiveMaxLines(CONSOLE_DEFAULT_MAX);
+let settingsLoadedAt = 0;
+
+function getCachedMaxLines(): number {
+  const now = Date.now();
+  // Re-read settings at most once every 5 seconds.
+  if (now - settingsLoadedAt > 5000) {
+    try {
+      cachedMaxLines = effectiveMaxLines(loadSettings().consoleMaxLines);
+    } catch { /* keep cached value */ }
+    settingsLoadedAt = now;
+  }
+  return cachedMaxLines;
+}
+
 export function pushToLogBuffer(rawChunk: unknown, _type?: string): void {
   const text = (rawChunk as Buffer)?.toString ? (rawChunk as Buffer).toString('utf8') : String(rawChunk);
   const lines = text.split('\n');
-  const maxLines = effectiveMaxLines(loadSettings().consoleMaxLines);
+  const maxLines = getCachedMaxLines();
 
   for (const lineText of lines) {
     // Skip the trailing empty fragment that split('\n') always produces.

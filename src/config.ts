@@ -60,7 +60,7 @@ export const PAPER_VERSION_IDS: string[] = [
   '1.15.2', '1.14.4', '1.13.2', '1.12.2', '1.11.2', '1.10.2', '1.9.4', '1.8.8'
 ];
 export const DEFAULT_VERSION = '1.20.4';
-export const DEFAULT_RAM = '2G';
+export const DEFAULT_RAM = '4G';
 export const JAVA_FALLBACKS = (): string[] => ['java', '/usr/bin/java', '/usr/local/bin/java', '/opt/java/bin/java'];
 
 // Java flags tuned for Minecraft server garbage collection (Aikar's flags).
@@ -77,7 +77,7 @@ const DEFAULT_JAVA_ARGS = [
 
 export const DEFAULT_SETTINGS: PanelSettings = {
   autoResource: true,
-  maxRam: '2G',
+  maxRam: '4G',
   javaPath: 'java',
   javaArgs: DEFAULT_JAVA_ARGS,
   serverVersion: '1.20.4',
@@ -99,7 +99,8 @@ export const DEFAULT_SETTINGS: PanelSettings = {
   pvp: true,
   onlineMode: true,
   whitelist: false,
-  viewDistance: 10,
+  viewDistance: 8,
+  simulationDistance: 6,
   spawnProtection: 16
 };
 
@@ -112,6 +113,7 @@ export const SETTINGS_TO_PROPS: Record<keyof PanelSettings, string> = {
   onlineMode: 'online-mode',
   whitelist: 'white-list',
   viewDistance: 'view-distance',
+  simulationDistance: 'simulation-distance',
   spawnProtection: 'spawn-protection',
   serverPort: 'server-port'
 } as unknown as Record<keyof PanelSettings, string>;

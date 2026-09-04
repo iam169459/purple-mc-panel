@@ -145,6 +145,7 @@ export interface PanelSettings {
   onlineMode: boolean;
   whitelist: boolean;
   viewDistance: number;
+  simulationDistance: number;
   spawnProtection: number;
 }
 
