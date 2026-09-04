@@ -143,21 +143,27 @@ export async function resolveRemoteVersion(): Promise<{ version: string; branch:
 // Check
 // ------------------------------------------------------------------
 
-export async function buildUpdateCheckPayload(): Promise<UpdateCheckPayload> {
+export async function buildUpdateCheckPayload(branchOverride?: string): Promise<UpdateCheckPayload> {
   const now = Date.now();
-  if (ctx.updateCheckCache && now - ctx.updateCheckCache.at < UPDATE_CHECK_TTL) {
+  // Only use cache when no branch override is specified
+  if (!branchOverride && ctx.updateCheckCache && now - ctx.updateCheckCache.at < UPDATE_CHECK_TTL) {
     return { ...ctx.updateCheckCache.payload, fromCache: true };
   }
 
   const currentVersion = getLocalVersion();
-  const remote = await resolveRemoteVersion();
+  let remote: { version: string; branch: string } | null = null;
+  if (branchOverride) {
+    remote = await fetchRemoteVersion(branchOverride);
+  } else {
+    remote = await resolveRemoteVersion();
+  }
   const newer = remote ? compareVersions(remote.version, currentVersion) : 0;
 
   const payload: UpdateCheckPayload = {
     method: 'github',
     source: 'version.json',
     gitRepoUrl: GIT_REMOTE_URL,
-    branch: remote ? remote.branch : (ctx.lastKnownBranch ?? GITHUB_BRANCH),
+    branch: remote ? remote.branch : (branchOverride ?? ctx.lastKnownBranch ?? GITHUB_BRANCH),
     checkedAt: new Date().toISOString(),
     currentVersion,
     latestVersion: remote ? remote.version : currentVersion,
@@ -166,12 +172,12 @@ export async function buildUpdateCheckPayload(): Promise<UpdateCheckPayload> {
     message: !remote
       ? 'Could not fetch version.json from the GitHub repository. Push version.json to the repo (main or master) and make sure the panel can reach the network.'
       : newer === 0
-        ? `This install matches the repository (v${currentVersion}).`
+        ? `This install matches the repository (v${currentVersion}) on branch ${remote.branch}.`
         : newer < 0
-          ? `The repository is at v${remote.version} — older than this install (v${currentVersion}). No downgrade performed.`
-          : `A newer release (v${remote.version}) is available on GitHub.`
+          ? `The repository is at v${remote.version} on branch ${remote.branch} — older than this install (v${currentVersion}). No downgrade performed.`
+          : `A newer release (v${remote.version}) is available on branch ${remote.branch}.`
   };
-  ctx.updateCheckCache = { at: now, payload };
+  if (!branchOverride) ctx.updateCheckCache = { at: now, payload };
   return payload;
 }
 
@@ -238,14 +244,19 @@ function restartPanel(): Promise<boolean> {
   });
 }
 
-export async function runGithubUpdate(): Promise<void> {
+export async function runGithubUpdate(branchOverride?: string): Promise<void> {
   const stageBase = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-update-'));
   const archivePath = path.join(stageBase, 'source.tar.gz');
 
   try {
     // ── 1 · resolve remote version from version.json ──────────────────
     emitUpdateEvent('system', '[STEP 1] Checking version.json against the GitHub repository...');
-    const remote = await resolveRemoteVersion();
+    let remote: { version: string; branch: string } | null = null;
+    if (branchOverride) {
+      remote = await fetchRemoteVersion(branchOverride);
+    } else {
+      remote = await resolveRemoteVersion();
+    }
     if (!remote) throw new Error('Could not fetch version.json from GitHub — the update was not installed.');
     const currentVersion = getLocalVersion();
     const cmp = compareVersions(remote.version, currentVersion);
