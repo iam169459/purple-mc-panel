@@ -5,7 +5,7 @@ import { useAsync } from '../hooks';
 import { useLive } from '../live';
 import { clx } from '../format';
 import {
-  Badge, Button, Card, EmptyState, PageHeader, Spinner, StatusDot
+  Badge, Button, Card, EmptyState, PageHeader, Select, Spinner, StatusDot
 } from '../components/ui';
 import type { UpdateCheck } from '../types';
 
@@ -28,11 +28,17 @@ export function UpdatesPage(): React.JSX.Element {
   const [progress, setProgress] = useState<ProgressLine[]>([]);
   const [running, setRunning] = useState(false);
   const [completed, setCompleted] = useState<{ success: boolean; message: string } | null>(null);
+  const [branch, setBranch] = useState<string>('main');
   const logRef = useRef<HTMLDivElement>(null);
 
   const loader = useCallback(async () => get<UpdateCheck>('/api/update/check'), []);
   const { data, loading, reload } = useAsync(loader, []);
   const check = data;
+
+  // Sync branch from server response
+  useEffect(() => {
+    if (check?.branch) setBranch(check.branch);
+  }, [check?.branch]);
 
   useEffect(() => {
     const s = live.socket;
@@ -60,11 +66,16 @@ export function UpdatesPage(): React.JSX.Element {
     if (el) el.scrollTop = el.scrollHeight;
   }, [progress.length]);
 
+  const checkForUpdates = async (): Promise<void> => {
+    const r = await get<UpdateCheck>(`/api/update/check?branch=${branch}`);
+    if (r.ok) reload();
+  };
+
   const install = async (): Promise<void> => {
     setRunning(true);
     setProgress([]);
     setCompleted(null);
-    const r = await post('/api/update/install');
+    const r = await post('/api/update/install', { branch });
     if (!r.ok) {
       setRunning(false);
       live.pushToast('error', r.error.message);
@@ -76,7 +87,20 @@ export function UpdatesPage(): React.JSX.Element {
       <PageHeader
         title="Updates"
         description="The panel updates itself straight from its GitHub repository — runtime data is preserved."
-        actions={<Button size="sm" variant="ghost" icon={<RefreshCcw className="h-4 w-4" />} onClick={reload} disabled={running}>Check again</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <Select
+              className="w-32"
+              value={branch}
+              onChange={setBranch}
+              options={[
+                { value: 'main', label: 'main — stable' },
+                { value: 'dev', label: 'dev — latest' }
+              ]}
+            />
+            <Button size="sm" variant="ghost" icon={<RefreshCcw className="h-4 w-4" />} onClick={checkForUpdates} disabled={running}>Check</Button>
+          </div>
+        }
       />
 
       <Card>
@@ -114,7 +138,7 @@ export function UpdatesPage(): React.JSX.Element {
               ) : (
                 <Badge tone="green"><CheckCircle2 className="h-3 w-3" /> up to date</Badge>
               )}
-              <Badge tone="zinc">branch {check.branch}</Badge>
+              <Badge tone="zinc">branch {branch}</Badge>
             </div>
           </div>
         )}

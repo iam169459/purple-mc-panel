@@ -9,9 +9,10 @@ import { log } from '../src/logger';
 import { buildUpdateCheckPayload, runGithubUpdate, emitUpdateEvent, getLocalVersion } from '../src/updater';
 
 export function register(app: Express): void {
-  app.get('/api/update/check', async (_req: Request, res: Response) => {
+  app.get('/api/update/check', async (req: Request, res: Response) => {
     try {
-      const payload = await buildUpdateCheckPayload();
+      const branchParam = req.query.branch as string | undefined;
+      const payload = await buildUpdateCheckPayload(branchParam);
       res.json(payload);
     } catch (err) {
       log(`Update check failed: ${(err as Error).message}`, 'error');
@@ -25,10 +26,12 @@ export function register(app: Express): void {
     }
   });
 
-  app.post('/api/update/install', (_req: Request, res: Response) => {
+  app.post('/api/update/install', (req: Request, res: Response) => {
     if (ctx.isUpdateRunning) {
       return res.status(409).json({ error: 'An update is already running. Please wait.' });
     }
+
+    const branch = (req.body?.branch as string) || undefined;
 
     // Respond immediately; the async runner streams progress over Socket.io.
     res.json({ success: true, status: 'github_update_initiated', method: 'github', source: 'version.json' });
@@ -36,8 +39,8 @@ export function register(app: Express): void {
     // Drop the cached check result so the next check reflects the installed version.
     ctx.updateCheckCache = null;
     ctx.isUpdateRunning = true;
-    log('GitHub update initiated (version.json source)', 'info');
-    runGithubUpdate()
+    log(`GitHub update initiated (version.json source, branch: ${branch ?? 'default'})`, 'info');
+    runGithubUpdate(branch)
       .catch((err: Error) => {
         log(`Update failed: ${err.message}`, 'error');
         emitUpdateEvent('error', `[GIT ERROR] ${err.message}`);
