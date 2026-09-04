@@ -251,7 +251,7 @@ pkg_run() { # <label> then command words...
 }
 
 install_system_deps() {
-    step 1 6 "System packages"
+    step 1 7 "System packages"
     if ! pkg_run "Refreshing package mirrors..." $PKG_UPDATE; then
         warn "Package index update had problems — continuing anyway."
     fi
@@ -354,7 +354,7 @@ install_java() {
 }
 
 fetch_code() { # new|fresh|reinstall handled here; fresh==new are identical except menu naming
-    step 2 6 "Panel code"
+    step 2 7 "Panel code"
     case "$INSTALL_MODE" in
         reinstall)
             cd "$PANEL_DIR" || { err "Install dir missing: $PANEL_DIR"; exit 1; }
@@ -410,7 +410,7 @@ fetch_code() { # new|fresh|reinstall handled here; fresh==new are identical exce
 }
 
 install_npm_deps() {
-    step 3 6 "Node modules"
+    step 3 7 "Node modules"
     cd "$PANEL_DIR"
     if ! $NEEDS_NPM; then
         info "Dependencies unchanged — skipping npm install."
@@ -422,7 +422,7 @@ install_npm_deps() {
     info "Node $nver · npm $nver_npm"
     local logfile pid
     logfile="$(mktemp /tmp/pmc-npm-XXXXXX.log)"
-    npm install --omit=dev --no-audit --no-fund >"$logfile" 2>&1 &
+    npm install --no-audit --no-fund >"$logfile" 2>&1 &
     pid=$!; show_spinner "$pid" "Installing Node modules..."
     if ! wait "$pid"; then
         err "npm install failed — output tail:"
@@ -551,8 +551,9 @@ setup_pm2() {
     if $NO_PM2; then return; fi
     if ! command -v pm2 &>/dev/null; then
         info "Installing PM2 globally..."
-        local pid
-        npm install -g pm2 --no-audit --no-fund >/dev/null 2>&1 &
+        local pid npm_bin
+        npm_bin="$(command -v npm 2>/dev/null || echo "$(dirname "$(command -v node 2>/dev/null || echo /usr/bin/node)")/npm")"
+        "$npm_bin" install -g pm2 --no-audit --no-fund >/dev/null 2>&1 &
         pid=$!; show_spinner "$pid" "Installing PM2..."; wait "$pid" 2>/dev/null || true
     fi
     command -v pm2 &>/dev/null || { err "PM2 install failed — rerun with --no-pm2."; exit 1; }
