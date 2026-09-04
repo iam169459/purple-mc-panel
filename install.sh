@@ -185,7 +185,7 @@ find_panel_dir() { # explicit --install-dir wins, else cwd when it's a clone, el
     # keep tracking it (e.g. a dev preview) unless --branch overrides it.
     if ! $BRANCH_SET && [[ -f "$PANEL_DIR/.env" ]]; then
         local env_branch
-        env_branch=$(grep -E '^BRANCH=' "$PANEL_DIR/.env" | tail -n1 | cut -d= -f2- | tr -d '"')
+        env_branch=$(grep -E '^BRANCH=' "$PANEL_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"' || true)
         [[ -n "$env_branch" ]] && BRANCH="$env_branch"
     fi
 }
