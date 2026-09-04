@@ -5,7 +5,8 @@
 #
 #   ./install.sh                  interactive menu (TTY)
 #   ./install.sh install [flags]  new or reinstall (auto-detected)
-#   ./install.sh update           sync code from GitHub, keep data
+#   ./install.sh update           sync code from GitHub — choose main or dev
+#   ./install.sh update-dev       sync code from the dev branch (latest features)
 #   ./install.sh status|start|stop|restart|logs|uninstall
 #
 # Flags (all commands): --port --install-dir --repo --branch
@@ -14,13 +15,14 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.4.0"
 REPO_URL="https://github.com/iam169459/purple-mc-panel.git"
 INSTALL_DIR="/var/www/purple-mc-panel"
 PANEL_DIR="$INSTALL_DIR"
 PM2_NAME="purple-mc-panel"
 PORT="3000"
 BRANCH="main"
+BRANCH_SET=false
 NO_PM2=false
 NO_JAVA=false
 NO_AUTOSTART=false
@@ -71,7 +73,8 @@ usage() {
     echo "  (none)            Interactive menu"
     echo "  setup             Guided full setup on a brand-new server/PC (from zero)"
     echo "  install           Install or reinstall the panel (auto-detects existing install)"
-    echo "  update            Sync panel code from GitHub (keeps config, worlds, backups)"
+    echo "  update            Sync panel code from GitHub — choose main or dev (keeps data)"
+    echo "  update-dev        Sync panel code from the dev branch (latest features)"
     echo "  fresh             Wipe the install directory and install from scratch"
     echo "  start | stop | restart   Control the PM2 service"
     echo "  status            Show service and code status"
@@ -92,7 +95,8 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  sudo $0 --unattended --port 8080          # one-shot install"
-    echo "  $0 update                                  # update an existing panel"
+    echo "  $0 update                                  # update an existing panel (main or dev)"
+    echo "  $0 update-dev                              # pull the latest dev build"
     echo "  $0 status"
 }
 
@@ -176,8 +180,16 @@ require_root() {
 }
 
 find_panel_dir() { # explicit --install-dir wins, else cwd when it's a clone, else default
-    if $INSTALL_DIR_SET; then PANEL_DIR="$INSTALL_DIR"; return; fi
-    if [[ -d .git ]] && [[ -f app.js ]]; then PANEL_DIR="$(pwd)"; else PANEL_DIR="$INSTALL_DIR"; fi
+    if $INSTALL_DIR_SET; then PANEL_DIR="$INSTALL_DIR";
+    elif [[ -d .git ]] && [[ -f app.js ]]; then PANEL_DIR="$(pwd)";
+    else PANEL_DIR="$INSTALL_DIR"; fi
+    # Remember the branch chosen by a previous install/update so later updates
+    # keep tracking it (e.g. a dev preview) unless --branch overrides it.
+    if ! $BRANCH_SET && [[ -f "$PANEL_DIR/.env" ]]; then
+        local env_branch
+        env_branch=$(grep -E '^BRANCH=' "$PANEL_DIR/.env" | tail -n1 | cut -d= -f2- | tr -d '"')
+        [[ -n "$env_branch" ]] && BRANCH="$env_branch"
+    fi
 }
 
 pm2_cmd() {
@@ -435,6 +447,13 @@ write_env_and_ecosystem() {
     fi
     mkdir -p "$PANEL_DIR/logs"
 
+    # Remember which branch this install tracks so future updates keep using it.
+    if grep -q "^BRANCH=" "$PANEL_DIR/.env"; then
+        sed -i "s|^BRANCH=.*|BRANCH=$BRANCH|" "$PANEL_DIR/.env"
+    else
+        echo "BRANCH=$BRANCH" >> "$PANEL_DIR/.env"
+    fi
+
     if $NO_PM2; then
         ok ".env written (PORT=$PORT). Skipping PM2 (--no-pm2)."
         return
@@ -654,15 +673,35 @@ cmd_setup() {
 # UPDATE / SERVICE / MISC
 # ════════════════════════════════════════════════════════════
 
-cmd_update() {
-    banner
-    find_panel_dir
+choose_update_branch() { # interactive: which branch should the update pull from?
+    if [[ ! -t 0 && ! -e /dev/tty ]]; then return; fi
+    local def=1
+    [[ "$BRANCH" == "dev" ]] && def=2
+    echo ""
+    hr
+    echo -e "  ${CYAN}Update from which branch?${NC}"
+    echo -e "    ${GREEN}1)${NC} main — stable release"
+    echo -e "    ${GREEN}2)${NC} dev  — latest features (may be experimental)"
+    echo ""
+    local choice
+    choice=$(prompt "Choose [1-2]:" "$def")
+    case "$choice" in
+        1) BRANCH="main" ;;
+        2) BRANCH="dev" ;;
+        *) err "Cancelled."; exit 1 ;;
+    esac
+    info "Updating from branch: $BRANCH"
+}
+
+require_git_panel() {
     if [[ ! -d "$PANEL_DIR/.git" ]]; then
         err "No git install found at $PANEL_DIR — nothing to update here."
         info "Run 'sudo $0 install' instead, or point --install-dir at the panel folder."
         exit 1
     fi
-    INSTALL_MODE="reinstall"
+}
+
+update_flow() { # shared by 'update' and 'update-dev' (git check + INSTALL_MODE done by caller)
     [[ $EUID -ne 0 ]] && warn "Not root — npm and PM2 steps may fail if the panel is root-owned."
     fetch_code
     install_npm_deps
@@ -682,6 +721,26 @@ cmd_update() {
         fi
     fi
     summary
+}
+
+cmd_update() { # interactive 'update' — asks main vs dev when run from a terminal
+    banner
+    find_panel_dir
+    require_git_panel
+    INSTALL_MODE="reinstall"
+    choose_update_branch
+    update_flow
+}
+
+cmd_update_dev() { # one-shot 'update-dev' — always pulls the dev branch (latest features)
+    banner
+    find_panel_dir
+    require_git_panel
+    INSTALL_MODE="reinstall"
+    BRANCH="dev"
+    BRANCH_SET=true
+    info "Updating from the 'dev' branch (latest features)."
+    update_flow
 }
 
 cmd_service() { # start|stop|restart
@@ -761,7 +820,7 @@ show_menu() {
         echo -e "  ${CYAN}Select an option:${NC}\n"
         echo -e "  ${GREEN}1)${NC} 🚀  New server/PC setup  (guided full install from zero)"
         echo -e "  ${GREEN}2)${NC} 📦  Install panel        (new or reinstall)"
-        echo -e "  ${GREEN}3)${NC} 🔄  Update panel          (sync GitHub, keep data)"
+        echo -e "  ${GREEN}3)${NC} 🔄  Update panel          (choose main or dev, keep data)"
         echo -e "  ${GREEN}4)${NC} ♻️   Fresh install         (wipe & scratch install)"
         echo -e "  ${GREEN}5)${NC} ▶️   Start service"
         echo -e "  ${GREEN}6)${NC} ⏹️   Stop service"
@@ -804,12 +863,12 @@ ARGS=""
 ACTION=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        setup|install|update|fresh|start|stop|restart|status|logs|uninstall)
+        setup|install|update|update-dev|fresh|start|stop|restart|status|logs|uninstall)
             ACTION="$1"; shift ;;
         --port)        PORT="${2:?Missing port value}"; ARGS="$ARGS $1 $2"; shift 2 ;;
         --install-dir) INSTALL_DIR="${2:?Missing install-dir value}"; INSTALL_DIR_SET=true; PANEL_DIR="$INSTALL_DIR"; ARGS="$ARGS $1 $2"; shift 2 ;;
         --repo)        REPO_URL="${2:?Missing repo URL}"; shift 2 ;;
-        --branch)      BRANCH="${2:?Missing branch name}"; shift 2 ;;
+        --branch)      BRANCH="${2:?Missing branch name}"; BRANCH_SET=true; shift 2 ;;
         --pm2-name)    PM2_NAME="${2:?Missing PM2 name}"; shift 2 ;;
         --no-pm2)      NO_PM2=true; shift ;;
         --no-java)     NO_JAVA=true; shift ;;
@@ -839,6 +898,7 @@ case "$ACTION" in
     install)   INSTALL_MODE=""; cmd_install ;;
     fresh)     INSTALL_MODE="fresh"; cmd_install ;;
     update)    cmd_update ;;
+    update-dev) cmd_update_dev ;;
     start|stop|restart) cmd_service "$ACTION" ;;
     status)    cmd_status ;;
     logs)      cmd_logs ;;
