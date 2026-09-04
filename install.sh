@@ -30,10 +30,11 @@ UNATTENDED=false
 NEEDS_NPM=true
 INSTALL_DIR_SET=false
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; MAGENTA='\033[0;35m'; NC='\033[0m'
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; CYAN=$'\033[0;36m'; MAGENTA=$'\033[0;35m'; NC=$'\033[0m'
 
 cleanup() { tput cnorm 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
+trap 'err "Script failed at line $LINENO: $BASH_COMMAND"; exit 1' ERR
 
 info()   { echo -e "${CYAN}[INFO]${NC} $1"; }
 ok()     { echo -e "${GREEN}[ OK ]${NC} $1"; }
@@ -42,22 +43,19 @@ err()    { echo -e "${RED}[ERR ]${NC} $1"; }
 hr()     { echo -e "${CYAN}──────────────────────────────────────────────────────${NC}"; }
 
 typewriter() {
-    local text="$1" delay="${2:-0.004}"
-    for (( i=0; i<${#text}; i++ )); do
-        printf "%s" "${text:$i:1}"
-        sleep "$delay"
-    done
-    echo ""
+    local text="$1"
+    echo -e "$text"
 }
 
 show_spinner() {
-    local pid=$1 message=$2 delay=0.07 spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local pid=$1 message=$2 delay=0.07
+    local -a frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local idx=0
     tput civis 2>/dev/null || true
     while kill -0 "$pid" 2>/dev/null; do
-        for (( i=0; i<${#spinstr}; i++ )); do
-            printf "\r${CYAN}[%c]${NC} %s" "${spinstr:$i:1}" "$message"
-            sleep "$delay"
-        done
+        printf "\r${CYAN}[%s]${NC} %s" "${frames[$idx]}" "$message"
+        idx=$(( (idx + 1) % ${#frames[@]} ))
+        sleep "$delay"
     done
     printf "\r\033[K"
     tput cnorm 2>/dev/null || true
