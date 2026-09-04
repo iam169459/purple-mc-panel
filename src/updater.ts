@@ -303,7 +303,9 @@ export async function runGithubUpdate(branchOverride?: string): Promise<void> {
     emitUpdateEvent('success', `[STEP 4] New files installed — version.json now reports v${stagedVersion}.`);
 
     // ── 5 · dependencies (only when package files changed) ────────────
-    if (filesDiffer(path.join(ROOT_DIR, 'package.json'), path.join(stageRoot, 'package.json'))) {
+    const pkgChanged = filesDiffer(path.join(ROOT_DIR, 'package.json'), path.join(stageRoot, 'package.json'));
+    const lockChanged = filesDiffer(path.join(ROOT_DIR, 'package-lock.json'), path.join(stageRoot, 'package-lock.json'));
+    if (pkgChanged || lockChanged) {
       emitUpdateEvent('system', '[STEP 5] Package files changed — installing dependencies (can take a minute)...');
       await runNpm(['install', '--no-audit', '--no-fund']);
     } else {
@@ -316,7 +318,15 @@ export async function runGithubUpdate(branchOverride?: string): Promise<void> {
       await runNpm(['run', 'build']);
       emitUpdateEvent('success', '[STEP 6] Build completed.');
     } catch (err) {
-      throw new Error(`Build after update failed: ${(err as Error).message}. The new files are in place — run "npm run build" manually, then restart the panel.`);
+      // First build failed — try a fresh npm install then rebuild.
+      emitUpdateEvent('warn', `[STEP 6] Build failed, retrying with fresh npm install...`);
+      try {
+        await runNpm(['install', '--no-audit', '--no-fund']);
+        await runNpm(['run', 'build']);
+        emitUpdateEvent('success', '[STEP 6] Build completed after dependency reinstall.');
+      } catch (err2) {
+        throw new Error(`Build after update failed: ${(err2 as Error).message}. The new files are in place — run "npm run build" manually, then restart the panel.`);
+      }
     }
     try { if (fs.existsSync(path.join(ROOT_DIR, 'install.sh'))) fs.chmodSync(path.join(ROOT_DIR, 'install.sh'), 0o755); } catch { /* ignore */ }
 
