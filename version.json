@@ -1,4 +1,4 @@
 {
-  "version": "1.0.7",
-  "notes": "Fix one-click plugin installs picking incompatible jars: version matching now checks the full supported Minecraft range of each build (and prefers stable builds), so Essential Pack and marketplace installs always download the right jar for the configured server version."
+  "version": "1.1.0",
+  "notes": "Full-stack rewrite: backend rewritten in TypeScript with a typed service/route layer, frontend rebuilt from scratch as a React (Vite + Tailwind) single-page app with a new interface, crash auto-restart throttle fixed so boot-crash loops stop after five attempts, console classification now matches Paper's real log prefixes, and a backup download endpoint added."
 }

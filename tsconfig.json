@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noUnusedLocals": false,
+    "sourceMap": false,
+    "declaration": false,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "routes/**/*.ts"],
+  "exclude": ["node_modules", "client", "dist", "test"]
+}

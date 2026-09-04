@@ -141,7 +141,11 @@ npm start
 ## 📁 Project structure
 
 ```
-app.js            Backend — Express API, Socket.IO events, process control, updater
+app.js            Thin entry point — middleware, route wiring, boot sequence
+src/              Backend modules — process control, sockets, updater, files, plugins,
+                  backups, tasks, disk/metrics, settings, graceful shutdown
+routes/           REST endpoints (status, server, files, plugins, backups, tasks,
+                  settings, network, updates)
 public/index.html Frontend — the entire panel UI (Tailwind + Font Awesome, no build step)
 install.sh        Unified manager — install / update / status / logs / uninstall + interactive menu
 version.json      Version manifest used for self-updates
